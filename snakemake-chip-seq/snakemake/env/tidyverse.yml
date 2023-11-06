@@ -1,0 +1,12 @@
+channels:
+  - r
+  - conda-forge
+  - anaconda
+dependencies:
+  - r-tidyverse
+  - r-gridextra
+  - r-gridbase
+  - cairo
+  - libtiff=4.0.10
+  - r-data.table
+  - r-kernsmooth

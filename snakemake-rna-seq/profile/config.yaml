@@ -1,0 +1,16 @@
+restart-times: 1
+jobscript: "slurm-jobscript.sh"
+cluster: "slurm-submit.py"
+cluster-status: "slurm-status.py"
+max-jobs-per-second: 1
+max-status-checks-per-second: 10
+local-cores: 1
+latency-wait: 60
+reason: True
+printshellcmds: True
+show-failed-logs: True
+use-singularity: True
+singularity-prefix: True
+singularity-args: "--bind /g/boulard/Francesco/projects/trim66/ --bind /g/boulard/NGS_Data_Library/2020-10-09-HVHTJBGXG --bind /g/boulard/NGS_Data_Library/2020-12-16-H7MKTBGXH --bind /g/boulard/NGS_Data_Library/2021-04-21-H2MNHBGXJ --bind /scratch/tabaro --bind /g/boulard/NGS_Data_Library/2021-08-10-HW2T7BGXJ"
+rerun-incomplete: True
+jobs: 1000

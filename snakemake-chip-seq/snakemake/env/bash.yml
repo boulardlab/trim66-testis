@@ -1,0 +1,6 @@
+channels:
+  - conda-forge
+dependencies:
+  - bash=5.1.16
+  - pigz=2.6
+  - bc=1.07.1

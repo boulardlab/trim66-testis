@@ -1,0 +1,2959 @@
+---
+title: "Comparison of TRIM66 RNA-seq datasets"
+output: 
+  html_document:
+    df_print: kable
+    number_sections: true
+    code_folding: hide
+    theme: spacelab
+    toc: true
+    toc_float: true
+    toc_depth: 2
+    style: custom.css
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(cowplot)
+library(DESeq2)
+library(rtracklayer)
+library(ComplexHeatmap)
+library(DT)
+library(clusterProfiler)
+library(org.Mm.eg.db)
+library(ReactomePA)
+library(edgeR)
+library(fontawesome)
+library(ggVennDiagram)
+
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, cache = TRUE, rows.print=15)
+
+knitr::knit_hooks$set(
+  error = function(x, options) {
+    paste('\n\n<div class="alert alert-danger">',
+          gsub('##', '\n', gsub('^##\ Error', '**Error**', x)),
+          '</div>', sep = '\n')
+  },
+  warning = function(x, options) {
+    paste('\n\n<div class="alert alert-warning">',
+          gsub('##', '\n', gsub('^##\ Warning:', '**Warning**', x)),
+          '</div>', sep = '\n')
+  },
+  message = function(x, options) {
+    paste('\n\n<div class="alert alert-info">',
+          gsub('##', '\n', x),
+          '</div>', sep = '\n')
+  }
+)
+
+ggtheme <- function(legend.position = "bottom") {
+  theme_bw(base_size = 14) %+replace%
+    theme(aspect.ratio = 1,
+          legend.position = legend.position,
+          legend.text = element_text(size = 14),
+          axis.title = element_text(size = 15),
+          legend.title = element_text(size = 15),
+          plot.title = element_text(size = 16),
+          strip.text = element_text(size = 14))
+}
+
+create_dt <- function(x, filename){
+  require(DT)
+  
+  dt_extensions <- "Buttons"
+  
+  dom <- 
+  
+  page_len <- 10
+  if (nrow(x) < 10) {
+    page_len <- nrow(x)
+    length_menu <- "All"
+  } else if (nrow(x) >= 10 & nrow(x) < 25) { 
+    length_menu <- c(10)
+  } else if (nrow(x) >= 25 & nrow(x) < 50) {
+    length_menu <- c(10, 25)
+  } else if (nrow(x) >= 50) {
+    length_menu <- c(10, 25, 50)
+  }
+  
+  dt_options <- list(pageLength = page_len,
+                     buttons = list(
+                       list(extend = 'csv', filename = filename),
+                       list(extend = 'excel', filename = filename)
+                     ))
+  
+  if (!is.null(length_menu)) {
+    dt_options[["lengthMenu"]] <- length_menu
+    dt_options[["dom"]] <- "'Blfrtip'"
+  } else {
+    dt_options[["dom"]] <- "'Bfrtip'"
+  }
+  
+  dt_options[["pageLength"]] <- page_len
+  
+  datatable(x, extensions = dt_extensions, options = dt_options)
+}
+
+create_go_dt <- function(x, filename) {
+  
+  x %>% as.data.frame %>%
+    dplyr::select(-c(ID, pvalue, qvalue)) %>%
+    mutate(p.adjust = format(p.adjust, scientific = TRUE, digits = 2)) %>%
+    rename_with(tolower) %>%
+    rename(`Adjusted p-value` = p.adjust) %>%
+    rename_with(Hmisc::capitalize) %>%
+    create_dt(filename)
+  
+}
+
+create_edger_dt <- function(x, filename) { 
+  x %>% as.data.frame %>%
+    dplyr::select(Name, description, mgi_type, logFC, PValue, FDR) %>%
+    mutate(logFC = format(logFC, scientific = FALSE, digits = 4),
+           PValue = format(PValue, scientific = TRUE, digits = 2),
+           FDR = format(FDR, scientific = TRUE, digits = 2)) %>%
+    rename_with(sub, pattern = "_", replacement = " ") %>%
+    rename_with(Hmisc::capitalize) %>%
+    create_dt(filename = filename)
+}
+
+create_reactome_dt <- function(x, filename) {
+  x %>% as.data.frame %>%
+    dplyr::select(-c(ID, pvalue, qvalue, Count)) %>%
+    mutate(p.adjust = format(p.adjust, scientific = TRUE, digits = 2)) %>%
+    rename_with(Hmisc::capitalize) %>%
+    create_dt(filename = filename)
+}
+
+create_trna_dt <- function(x, filename) {
+  x %>% as.data.frame %>%
+    dplyr::select(log2FoldChange, padj) %>%
+    mutate(padj = format(padj, scientific = TRUE, digits = 2),
+           log2FoldChange = format(log2FoldChange, scientific = FALSE, digits = 4)) %>%
+    rename(`Adjusted p-value` = padj,
+           `log2 Fold Change` = log2FoldChange) %>%
+    create_dt(filename = filename)
+}
+
+create_starte_dt <- function(x, filename) {
+  x %>% as.data.frame %>%
+    mutate(padj = format(padj, scientific = TRUE, digits = 2),
+           log2FoldChange = format(log2FoldChange, scientific = FALSE, digits = 4)) %>%
+    rename(`Adjusted p-value` = padj,
+           `log2 Fold Change` = log2FoldChange) %>%
+    rename_with(sub, pattern = "_", replacement = " ") %>%
+    rename_with(Hmisc::capitalize) %>%
+    create_dt(filename = filename)
+}
+
+create_deseq_dt <- function(x, filename) {
+  x %>% as.data.frame %>%
+  dplyr::select(ID, Name, description, 
+                  mgi_type, log2FoldChange, padj) %>%
+    arrange(padj, abs(log2FoldChange)) %>%
+    mutate(padj = format(padj, scientific = TRUE, digits = 2),
+           log2FoldChange = format(log2FoldChange, scientific = FALSE, digits = 4)) %>%
+    rename_with(sub, pattern = "_", replacement = " ") %>%
+    rename_with(Hmisc::capitalize) %>%    
+    dplyr::rename(`log2 Fold Change` = Log2FoldChange , 
+                  `Adjusted p-value` = Padj, 
+                  
+                  `Gene type` = `Mgi type`) %>%
+    create_dt(filename = filename)
+}
+
+
+root <- "/g/boulard/Francesco/projects/trim66/data/rna-seq"
+
+sample_sheets <- c(TRIM66_Apr2021 = file.path(root, "sample_sheet_trim66-gfp_totalRNA-seq.csv"),
+                   TRIM66_Dec2020 = file.path(root, "sample_sheet_trim66-gfp.csv"),
+                   TRIM66_elongatedSpermatids_Ago2021_noeGFP2=file.path(root, "sample_sheet_trim66-elongatedSpermatids_Ago2021_noeGFP2.csv"),
+                   TRIM66_elongatedSpermatids_Ago2021_noeGFP2_noeGFP3_noeGFP6=file.path(root, "sample_sheet_trim66-elongatedSpermatids_Ago2021_noeGFP2_noeGFP3_noeGFP6.csv"),
+                   TRIM66_elongatedSpermatids_Ago2021=file.path(root, "sample_sheet_trim66-elongatedSpermatids_Ago2021.csv"),
+                   TRIM66_Oct2020=file.path(root, "sample_sheet.csv"))
+
+sample_name_paterns <- c("tMBAO", "MBAO", "eGFP", "mbaj")
+
+mains <- list(
+  TRIM66_Apr2021="TRIM66-GFP\nRS total RNA-seq",
+  TRIM66_Dec2020="TRIM66-GFP\nRS polyA RNA-seq",
+  TRIM66_Oct2020="TRIM66-PHD-null\nRS total RNA-seq",
+  TRIM66_elongatedSpermatids_Ago2021="TRIM66-GFP\nES total RNA-seq",
+  TRIM66_elongatedSpermatids_Ago2021_noeGFP2="TRIM66-GFP\nES total RNA-seq\nno eGFP2",
+  TRIM66_elongatedSpermatids_Ago2021_noeGFP2_noeGFP3_noeGFP6="TRIM66-GFP\nES total RNA-seq\nno eGFP2, eGFP3 and eGFP6"
+)
+```
+
+This report documents the comparative analysis of the 4 RNA-seq datasets generated in two different maturation stages of spermatids in TRIM66 mutant mice:
+
+```{r libraries_df}
+data.frame(
+  `Cell type` = c(rep("Round spermatids", 3), "Elongating spermatids"),
+  Allele = c("Trim66-GFP", "Trim66-GFP", "Trim66-PHD-NULL", "Trim66-GFP"),
+  `Sequencing protcol` = c("total RNA-seq", "polyA RNA-seq", "total RNA-seq", "total RNA-seq"),
+  `Number of samples` = rep(12, 4),
+`Library type`= c(rep("Paired-end",2), "Single-end", "Paired-end"))
+```
+
+# QC: FastQC
+
+```{r define_helper}
+trim66stop_total_round <- read_tsv(file.path(root, "qc/multiqc/raw/TRIM66_Oct2020/multiqc_data/multiqc_general_stats.txt"))
+trim66gfp_polya_round <- read_tsv(file.path(root, "qc/multiqc/raw/TRIM66_Dec2020/multiqc_data/multiqc_general_stats.txt"))
+trim66gfp_total_round <- read_tsv(file.path(root, "qc/multiqc/raw/TRIM66_Apr2021/multiqc_data/multiqc_general_stats.txt"))
+trim66gfp_total_elongated <- read_tsv(file.path(root, "qc/multiqc/raw/TRIM66_elongatedSpermatids_Ago2021/multiqc_data/multiqc_general_stats.txt"))
+
+
+get_duplication_level <- function(t) t %>%
+  dplyr::select(Sample, `FastQC_mqc-generalstats-fastqc-percent_duplicates`)
+
+get_total_seqs <- function(t) t %>%
+  dplyr::select(Sample, `FastQC_mqc-generalstats-fastqc-total_sequences`)
+
+get_percent_cg <- function(t) t %>%
+  dplyr::select(Sample, `FastQC_mqc-generalstats-fastqc-percent_gc`)
+
+
+build_dat <- function(sele_fn){
+  dat <- rbind(trim66stop_total_round %>%
+                 sele_fn %>%
+                 mutate(dataset = "TRIM66-STOP",
+                        cell_type = "Round spermatids",
+                        method = "Total RNA-seq"),
+               trim66gfp_polya_round %>%
+                 sele_fn %>%
+                 mutate(dataset = "TRIM66-GFP",
+                        cell_type = "Round spermatids",
+                        method = "PolyA RNA-seq"),
+               trim66gfp_total_round %>%
+                 sele_fn %>%
+                 mutate(dataset = "TRIM66-GFP",
+                        cell_type = "Round spermatids",
+                        method = "Total RNA-seq"),
+               trim66gfp_total_elongated %>%
+                 sele_fn %>%
+                 mutate(dataset = "TRIM66-GFP",
+                        cell_type = "Elongated spermatids",
+                        method = "Total RNA-seq"))
+  counts <- dat %>% group_by(dataset) %>% summarize(n = n())
+  dat %>% inner_join(counts)
+}
+```
+
+Sequencing libraries were indepently analyzed and their quality was assessed with FastQC. 
+
+## Plot libraries size
+
+```{r plot_library_size, fig.width=7, fig.height=7}
+total_seqs_initial <- build_dat(get_total_seqs)
+p2 <- total_seqs_initial %>%
+  rename_with(function(x) c("sample", "total sequences", "dataset", "cell_type", "method", "n")) %>%
+  mutate(label = dataset)  %>%
+  ggplot(aes(y = label, x = `total sequences`, fill = method)) +
+  geom_violin(draw_quantiles = c(.25, .5, .75)) +
+  geom_jitter(size = 0.3, width = 0.1) +
+  ylab("Dataset") +
+  ggtitle("Total number of sequences") +
+  scale_x_continuous(labels = function(x) paste0(x / 1e6, "M"), name = "Library size") +
+  scale_fill_discrete(name = "Technique") +
+  facet_grid(cell_type ~ method) +
+  ggtheme() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+p2
+```
+
+Library sizes range around 40-50 million reads for all datasets. A few outliers can be observed at both ends of the distributions with either reduced (less than 40M reads) or exceptionally high (more than 60M reds) library size.
+
+## Plot duplication level across all datasets
+
+```{r plot_reads_duplication, fig.width=7, fig.height=7}
+p1 <- build_dat(get_duplication_level) %>%
+  rename_with(function(x) c("sample", "duplication level", "dataset", "cell_type", "method", "n")) %>%
+  mutate(label = dataset)  %>%
+  ggplot(aes(label, `duplication level`, fill = method)) +
+  geom_violin(draw_quantiles = c(.25, .5, .75)) +
+  geom_jitter(size = 0.3, width = 0.25) +
+  xlab("Dataset") +
+  ylab("Duplication level") +
+  ggtitle("Percent duplication") +
+  scale_fill_discrete(name = "Technique") +
+  scale_y_continuous(labels = function(x) scales::percent(x, scale = 1)) +
+  coord_flip() +
+  facet_grid(cell_type ~ method) +
+  ggtheme()
+p1
+```
+
+High duplication level is often observed in RNA-seq experiments, thus, values in the 50-60% ball park for round spermatids libraries are not to be worried about. The reason for the increased percentage of duplicated reads is that the composition of the input RNA is heavily dominated by highly transcribed transcripts, thus, to sequence at sufficient coverage lowly expressed transcripts, it is common practice to over sequence highly transcribed ones. This explanation fits also the higher read duplication percentage (70-80%) observed in the elongated spermatids dataset were transcription is expected to be generally lower and thus at similar library size corresponds higher sequence duplication.
+
+## Plot CG content
+
+```{r plot_percent_cg, fig.width=7, fig.height=7}
+p3 <- build_dat(get_percent_cg) %>%
+  rename_with(function(x) c("sample", "percent cg", "dataset", "cell_type", "method", "n")) %>%
+  mutate(label = dataset)  %>%
+  ggplot(aes(label, `percent cg`, fill = method)) +
+  geom_violin(draw_quantiles = c(.25, .5, .75)) +
+  geom_jitter(size = 0.3, width = 0.25) +
+  scale_y_continuous(labels = function(x) scales::percent(x, scale = 1)) +
+  xlab("Dataset") +
+  ylab("Percent CG") +
+  ggtitle("Percent CG") +
+  scale_fill_discrete(name = "Technique") +
+  coord_flip() +
+  facet_grid(cell_type ~ method) +
+  ggtheme() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p3
+```
+
+From the violin plots above GC contents of the reads appears to be rather uniform (dynamic range is 5% at most and only for one round spermatids dataset).
+
+```{r cg_helpers, fig.height=8, fig.width=8}
+parse_multiqc_data <- function (path) {
+  require(rjson)
+  multiqc_data_file <- file.path(path, "multiqc_data.json")
+  print(multiqc_data_file)
+  multiqc_data <- fromJSON(file = multiqc_data_file)
+  gc_perc <- multiqc_data[["report_plot_data"]][["fastqc_per_sequence_gc_content_plot"]][["datasets"]][[1]]
+  mat <- matrix(0,101,length(gc_perc))
+  cn <- rep(NA, length(gc_perc))
+  for (i in seq_along(gc_perc)) {
+    gc <- gc_perc[[i]]$data
+    mat[,i] <- sapply(gc, `[`, 2)
+    cn[i] <- gc_perc[[i]]$name
+  }
+  colnames(mat) <- cn
+  mat <- as_tibble(mat) %>% mutate(x = seq(nrow(mat)))
+  dat <- mat %>%
+    pivot_longer(cols = -x, 
+                 names_to = "sample", 
+                 values_to = "cg_perc") 
+  return(dat)
+}
+
+get_gc_curve <- function(path) {
+  cg_perc_file <- file.path(path, "mqc_fastqc_per_sequence_gc_content_plot_Percentages.txt")
+  if (file.exists(cg_perc_file)) {
+    
+    dat <- read_tsv(cg_perc_file, skip = 1, col_names = FALSE) %>%
+      column_to_rownames(var = "X1") %>% 
+      as.matrix %>% t %>% as_tibble %>%
+      mutate(x = seq(101)) %>%
+      pivot_longer(cols = -x, 
+                   names_to = "sample",
+                   values_to = "cg_perc")
+    
+  } else {
+    dat <- parse_multiqc_data(path)
+  }
+  
+  
+  fastqc_stats_file <- file.path(path, "multiqc_fastqc.txt")
+  fastqc_stats <- read_tsv(fastqc_stats_file) %>%
+    dplyr::select(Sample, per_sequence_gc_content) %>%
+    dplyr::rename(sample = Sample,
+                  status = per_sequence_gc_content)
+  
+  dat <- dat %>% inner_join(fastqc_stats)
+  
+  return(dat)
+}
+
+plot_cg_curves <- function(paths){
+  
+  get_cg_table <- function(path, dataset, cell_type, method, cg_content) get_gc_curve(path) %>%  
+    mutate(dataset = dataset, method = method, cell_type = cell_type, cg = cg_content)
+  
+  rbind(get_cg_table(paths[1], dataset = "TRIM66-STOP", 
+                     cell_type = "Round spermatids", 
+                     method = "Total RNA-seq", cg_content = 42),
+        get_cg_table(paths[2], dataset = "TRIM66-GFP", 
+                     cell_type = "Round spermatids", 
+                     method = "PolyA RNA-seq", cg_content = 42),
+        get_cg_table(paths[3], dataset = "TRIM66-GFP", 
+                     cell_type = "Round spermatids", 
+                     method = "Total RNA-seq", cg_content =42),
+        get_cg_table(paths[4], dataset = "TRIM66-GFP", 
+                     cell_type = "Elongated spermatids", 
+                     method = "Total RNA-seq", cg_content = 42)) %>% 
+    ggplot(aes(x = x, y = cg_perc, group = sample, color = status)) +
+    facet_grid(cell_type + dataset ~ method) +
+    geom_line(size = 0.2, key_glyph = draw_key_rect) +
+    geom_vline(aes(xintercept = cg), size = 0.5, 
+               color = "dodgerblue", 
+               linetype = "dashed", 
+               key_glyph = draw_key_rect) +
+    scale_x_continuous(name="Mean CG content", 
+                       labels = function(x) scales::percent(x, scale = 1)) +
+    scale_y_continuous(name = "Reads percent", 
+                       labels = function(x) scales::percent(as.integer(x), 
+                                                            scale = 1)) +
+    scale_color_manual(name = "FastQC status", 
+                       breaks = c("fail", "pass", "warn", "cg"),
+                       values = c(fail = "#d9534f", pass = "#5cb85c", 
+                                  warn = "#fee391", cg = "dodgerblue"),
+                       labels = Hmisc::capitalize(c("fail", "pass", 
+                                                    "warn", "organism CG%"))) +
+    ggtheme() + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+plot_cg_curves(c(
+  file.path(root, "qc/multiqc/raw/TRIM66_Oct2020/multiqc_data"),
+  file.path(root, "qc/multiqc/raw/TRIM66_Dec2020/multiqc_data"),
+  file.path(root, "qc/multiqc/raw/TRIM66_Apr2021/multiqc_data"),
+  file.path(root, "qc/multiqc/raw/TRIM66_elongatedSpermatids_Ago2021/multiqc_data")))
+```
+
+The curves above show that the Trim66-GFP datasets have a few problematic samples in terms of CG composition. The sharp spikes at 55% CG content could represent sequencing primer contamination, thus, the [next step](#adapter-trimming) should take care of if. 
+In these curves can be also observed that mean values (the summit of the curve), is shifted to the right with respect to the genomic CG content value. This is because only a subset of sequences get transcribed and thus sequenced and they have a biased composition in terms of CG content.
+
+# Adapter trimming: Trimmomatic
+
+All samples were trimmed with Trimmomatic. The program was configured according to the library type. Overall parameters were kept constant to ensure data were analysed uniformly.
+
+```{r trimmmomatic_params}
+data.frame(
+ row.names = c(
+   "Trim66-PHD-NULL RS total RNA-seq",
+   "Trim66-GFP RS polyA RNA-seq",
+   "Trim66-GFP RS total RNA-seq",
+   "Trim66-GFP ES total RNA-seq"
+ ),
+ "ILLUMINACLIP" = c("TruSeq3-SE.fa:1:0:15:2", 
+                    "TruSeq3-PE.fa:1:30:15:2:true", 
+                    "TruSeq3-PE.fa:1:30:15:2:true",
+                    "TruSeq3-PE.fa:1:30:15:2:true"
+                    ) ,
+ "SLIDINGWINDOW" = c("20:22", "20:22", "20:22", "20:22"),
+ "MAXINFO" = c("20:0.6", "20:0.6", "20:0.6", "20:0.6"),
+ "LEADING" = c("22", "22", "22", "22"), 
+ "TRAILING" = c("20", "20", "20", "20"),
+ "MINLEN" = c("50", "50", "40", "40")
+) %>% t %>% as.data.frame
+```
+
+Explanation:
+
+  - `ILLUMINACLIP`: cut adapter and other Illumina-specific sequences from the read. Parameters:
+    - `fastaWithAdaptersEtc`: specifies the path to a fasta file containing all the adapters
+    - `seed mismatches`: specifies the maximum mismatch count which will still allow a full match to be performed (set to 1)
+    - `palindrome clip threshold`: specifies how accurate the match between the two 'adapter ligated' reads must be for PE palindrome read alignment (set to 30 for paired-end libraries)
+    - `simple clip threshold`: specifies how accurate the match between any adapter etc. sequence must be against a read (set to 15)
+    - `minAdapterLength`: in addition to the alignment score, palindrome mode can verify that a minimum length of adapter has been detected (set to 2)
+    - `keepBothReads`: after read-though has been detected by palindrome mode, and the
+adapter sequence removed, the reverse read contains the same sequence information as the forward read, albeit in reverse complement. For this reason, the default behavior is to entirely drop the reverse read. By specifying `true` for this parameter, the reverse read will also be retained (set to `true` for paired-end libraries)
+  - `SLIDINGWINDOW`: performs a sliding window trimming approach. It starts 
+scanning at the 5‟ end and clips the read once the average quality within the window 
+falls below a threshold. Parameters:
+    - `windowSize` set to 20bp
+    - `requiredQuality`: set to 22
+  - `MAXINFO`: an adaptive quality trimmer which balances read length and error rate to maximise the value of each read. Parameters:
+    - `targetLength`: this specifies the read length which is likely to allow the 
+location of the read within the target sequence to be determined (set to 20)
+    - `strictness`:  this value, which should be set between 0 and 1, specifies the 
+balance between preserving as much read length as possible vs. removal of incorrect 
+bases (set to 0.6)
+  - `LEADING`: cut bases off the start of a read, if below a threshold quality (set to 22)
+  - `TRAILING`: cut bases off the end of a read, if below a threshold quality (set to 20)
+  - `MINLEN`: drop the read if it is below a specified length (set to 40 or 50 depending on the average read length detected by FastQC)
+
+```{r plot_percent_trimmed, fig.width=7, fig.height=7}
+trim66stop_total_round <- read_tsv(file.path(root, "qc/multiqc/trim/TRIM66_Oct2020/multiqc_data/multiqc_general_stats.txt"))
+trim66gfp_polya_round <- read_tsv(file.path(root, "qc/multiqc/trim/TRIM66_Dec2020/multiqc_data/multiqc_general_stats.txt"))
+trim66gfp_total_round <- read_tsv(file.path(root, "qc/multiqc/trim/TRIM66_Apr2021/multiqc_data/multiqc_general_stats.txt"))
+trim66gfp_total_elongated <- read_tsv(file.path(root, "qc/multiqc/trim/TRIM66_elongatedSpermatids_Ago2021/multiqc_data/multiqc_general_stats.txt"))
+
+get_percent_dropped <- function(t) t %>% dplyr::select(Sample, `Trimmomatic_mqc-generalstats-trimmomatic-dropped_pct`)
+
+build_dat(get_percent_dropped) %>%
+  rename_with(function(x) c("sample", "dropped percent", "dataset", "cell_type", "method", "n")) %>%
+  mutate(label = dataset) %>%
+  ggplot(aes(label, `dropped percent`, fill = method)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = function(x) scales::percent(x, scale = 1)) +
+  xlab("Dataset") +
+  ylab("Dropped percent") +
+  ggtitle("Percent of dropped bases") +
+  scale_fill_discrete(name = "Technique") +
+  coord_flip() +
+  facet_grid(cell_type ~ method) +
+  ggtheme() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The boxplot above shows that about 2% to 3% of bases were lost during the trimming procedure.
+
+```{r plot_cg_content_after_trim, fig.height=8, fig.width=8}
+plot_cg_curves(c(
+  file.path(root, "qc/multiqc/trim/TRIM66_Oct2020/multiqc_data/"),
+  file.path(root, "qc/multiqc/trim/TRIM66_Dec2020/multiqc_data/"),
+  file.path(root, "qc/multiqc/trim/TRIM66_Apr2021/multiqc_data/"),
+  file.path(root, "qc/multiqc/trim/TRIM66_elongatedSpermatids_Ago2021/multiqc_data/")))
+```
+
+The trimming procedure results in removal of CG content bases for almost all the samples except for two samples in the Trim66-GFP elongated spermatids dataset. Because of this two versions of the downstream analysis will be presented: either keeping all the samples or removing these two.
+
+# Alignment: STAR
+
+STAR was used to align reads to the reference genome (mm10). Identical parameters were used for all libraries:
+
+  - `--seedSearchStartLmax 30`: defines the search start point through the read - the read is split into pieces no longer than this value (default 50) 
+  - `--winAnchorMultimapNmax 40`: max number of loci anchors are allowed to map to (default 50)
+  
+By lowering the `seedSearchStartLmax` parameter shorter reads were allowed to map but an increased number of seed alignment loci were detected. The `winAnchorMultimapNmax` parameter allows alignments to seed in up to 40 loci, thus defines multimappers as reads with more than 40 mapping locations. 
+
+In addition the two pass mode, duplicate marking for reads with identical coordinate, quality and mapping attributes (SAM flags) and alignment to transcriptome features were enabled.
+
+```{r import_star_stats}
+
+get_star <- function(path) read_tsv(path) %>%
+  dplyr::select(Sample, uniquely_mapped_percent, multimapped_percent, unmapped_mismatches_percent, unmapped_tooshort_percent, unmapped_other_percent)
+
+trim66stop_total_round <- get_star(file.path(root, "qc/multiqc/star/TRIM66_Oct2020/multiqc_data/multiqc_star.txt"))
+trim66gfp_polya_round <- get_star(file.path(root, "qc/multiqc/star/TRIM66_Dec2020/multiqc_data/multiqc_star.txt"))
+trim66gfp_total_round <- get_star(file.path(root, "qc/multiqc/star/TRIM66_Apr2021/multiqc_data/multiqc_star.txt"))
+trim66gfp_total_elongated <- get_star(file.path(root, "qc/multiqc/star/TRIM66_elongatedSpermatids_Ago2021/multiqc_data/multiqc_star.txt"))
+
+get_all_rates <- function(t) t %>% dplyr::select(everything())
+```
+
+Below, the overall alignment rate of all libraries is reported. 
+
+```{r plot_overall_alignment_rate, fig.width=9, fig.height=9}
+build_dat(get_all_rates) %>% 
+  filter(!grepl("STARpass1", Sample)) %>%
+  group_by(dataset, method, cell_type) %>%
+  mutate(Sample = seq_along(Sample)) %>%
+  pivot_longer(cols = ends_with("percent")) %>%
+  mutate(name = factor(name, levels = rev(c(
+    "uniquely_mapped_percent",
+    "multimapped_percent",
+    "unmapped_mismatches_percent",
+    "unmapped_tooshort_percent",
+    "unmapped_other_percent"
+  )))) %>%
+  ggplot(aes(Sample, value, fill = name)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = function(x) scales::percent(x, scale = 1)) +
+  xlab("Sample") +
+  ylab("Alignment rate") +
+  scale_fill_manual(name = "Technique",
+                    labels = c(uniquely_mapped_percent = "Uniquely mapped",
+                               multimapped_percent = "Multimapped",
+                               unmapped_mismatches_percent = "Unmapped - mismatch",
+                               unmapped_tooshort_percent = "Unmapped - too short",
+                               unmapped_other_percent = "Unmapped - other"),
+                    values = c(
+                      uniquely_mapped_percent = "#A0D568",
+                      multimapped_percent = "#ED5564",
+                      unmapped_mismatches_percent = "#FFCE54",
+                      unmapped_tooshort_percent = "4FC1E8",
+                      unmapped_other_percent = "#AC92EB"
+                    )) +
+  coord_flip() +
+  facet_grid(cell_type + dataset ~ method) +
+  ggtheme(legend.position = "right") +
+  theme(axis.text.y = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The total RNA-seq libraries display a consistent number of uniquely mapping (~ 90%) and multimapping reads (< 10%). Globally the percentage of unmapped and multimapped reads is aroud 10%. One noticeable example is a sample from the elongated spermatids dataset which shows about 25% of multimapping reads.
+
+For the polyA RNA-seq dataset even less reads map to multiple locations and thus a higher percentage of uniquely mapping reads can be observed. 
+
+## Alignment QC: FastQC
+
+After alignment, library size, reads duplication and GC content.
+
+```{r load_star_mqc_general_stats}
+trim66stop_total_round <- read_tsv(file.path(root, "qc/multiqc/star/TRIM66_Oct2020/multiqc_data/multiqc_general_stats.txt"))
+trim66gfp_polya_round <- read_tsv(file.path(root, "qc/multiqc/star/TRIM66_Dec2020/multiqc_data/multiqc_general_stats.txt"))
+trim66gfp_total_round <- read_tsv(file.path(root, "qc/multiqc/star/TRIM66_Apr2021/multiqc_data/multiqc_general_stats.txt"))
+trim66gfp_total_elongated <- read_tsv(file.path(root, "qc/multiqc/star/TRIM66_elongatedSpermatids_Ago2021/multiqc_data/multiqc_general_stats.txt"))
+```
+
+```{r plot_fastqc_aln, fig.height=21, fig.width=8}
+total_seqs_final <- build_dat(get_total_seqs)
+
+p2 <- total_seqs_final %>%
+  rename_with(function(x) c("sample", "total sequences", "dataset", "cell_type", "method", "n")) %>%
+  mutate(label = dataset)  %>%
+  ggplot(aes(y = label, x = `total sequences`, fill = method)) +
+  geom_violin(draw_quantiles = c(.25, .5, .75)) +
+  geom_jitter(size = 0.3, width = 0.1) +
+  ylab("Dataset") +
+  ggtitle("Total number of sequences") +
+  scale_x_continuous(labels = function(x) paste0(x / 1e6, "M"), name = "Library size") +
+  scale_fill_discrete(name = "Technique") +
+  facet_grid(cell_type ~ method) +
+  ggtheme() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p1 <- build_dat(get_duplication_level) %>%
+  rename_with(function(x) c("sample", "duplication level", "dataset", "cell_type", "method", "n")) %>%
+  mutate(label = dataset)  %>%
+  ggplot(aes(label, `duplication level`, fill = method)) +
+  geom_violin(draw_quantiles = c(.25, .5, .75)) +
+  geom_jitter(size = 0.3, width = 0.25) +
+  xlab("Dataset") +
+  ylab("Duplication level") +
+  ggtitle("Percent duplication") +
+  scale_fill_discrete(name = "Technique") +
+  scale_y_continuous(labels = function(x) scales::percent(x, scale = 1)) +
+  coord_flip() +
+  facet_grid(cell_type ~ method) +
+  ggtheme() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p3 <- build_dat(get_percent_cg) %>%
+  rename_with(function(x) c("sample", "percent cg", "dataset", "cell_type", "method", "n")) %>%
+  mutate(label = dataset)  %>%
+  ggplot(aes(label, `percent cg`, fill = method)) +
+  geom_violin(draw_quantiles = c(.25, .5, .75)) +
+  geom_jitter(size = 0.3, width = 0.25) +
+  scale_y_continuous(labels = function(x) scales::percent(x, scale = 1)) +
+  xlab("Dataset") +
+  ylab("Percent CG") +
+  ggtitle("Percent CG") +
+  scale_fill_discrete(name = "Technique") +
+  coord_flip() +
+  facet_grid(cell_type ~ method) +
+  ggtheme() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+plot_grid(p2,p1,p3, nrow = 3)
+```
+
+For paired-end libraries, library size after alignment is calculated pooling together the two mates, thus the displayed value is about double the initial number. As a control, the library size of the only single end library, after alignment, stays coherent with the initial value. 
+
+The percentage of duplicated reads dropped from 50-60% to 20-30%. This result might be over-optimistic because of the combination of two factors: the sampling procedure performed by FastQC and the input files used. In short, this QC analysis was performed on sorted genome aligned reads and to compute percent duplication, FastQC samples the first 100,000 reads from its input. The implication of this is that FastQC analysed the first 100,000 reads mapping to chromosome 1 (or the first chromosome present in the alignment file), which do not give an unbiased representation of the duplication level after alignment.
+
+Finally, CG content appears to be right skewed and maintains the trend described for the unmapped library.
+
+```{r plot_gc_after_alignment, fig.width=8, fig.height=8}
+plot_cg_curves(c(
+  file.path(root, "qc/multiqc/star/TRIM66_Oct2020/multiqc_data/"),
+  file.path(root, "qc/multiqc/star/TRIM66_Dec2020/multiqc_data/"),
+  file.path(root, "qc/multiqc/star/TRIM66_Apr2021/multiqc_data/"),
+  file.path(root, "qc/multiqc/star/TRIM66_elongatedSpermatids_Ago2021/multiqc_data/")
+))
+```
+
+Inspection of the CG curves shows that alignment did not resolve the problem with elongated spermatids samples. They still show a sharp peak at around 60% CG content. 
+
+## STAR: Gene counts
+
+Unstranded gene counts were produced using the `GeneCount` feature of STAR. Below summary statistics on the number of reads per feature are reported. Consistently the same annotation was used to quantify gene expression across all libraries. The Mouse Genome Informatics annotation was used as reference annotation in all cases.
+
+```{r plot_GeneCounts, fig.width=8, fig.height=10}
+trim66stop_total_round <- read_tsv(file.path(root, "qc/multiqc/star/TRIM66_Oct2020/multiqc_data/mqc_star_gene_counts_Unstranded.txt"))
+trim66gfp_polya_round <- read_tsv(file.path(root, "qc/multiqc/star/TRIM66_Dec2020/multiqc_data/mqc_star_gene_counts_Unstranded.txt"))
+trim66gfp_total_round <- read_tsv(file.path(root, "qc/multiqc/star/TRIM66_Apr2021/multiqc_data/mqc_star_gene_counts_Unstranded.txt"))
+trim66gfp_total_elongated <- read_tsv(file.path(root, "qc/multiqc/star/TRIM66_elongatedSpermatids_Ago2021/multiqc_data/mqc_star_gene_counts_Unstranded.txt"))
+
+get_gene_counts <- function(t) t %>% dplyr::select(everything())
+
+p1 <- build_dat(get_gene_counts) %>%
+  group_by(dataset, method, cell_type,) %>%
+  mutate(Sample = seq_along(Sample)) %>%
+  pivot_longer(cols = -c(Sample, dataset, cell_type, method, n)) %>%
+  ggplot(aes(Sample, value, fill = name)) +
+  geom_bar(stat = "identity", position = "stack") +
+  xlab("Sample") +
+  ylab("Number of reads (millions)") +
+  # ggtitle("Overall alignment rate") +
+  scale_fill_discrete(name = "Feature type") +
+  scale_y_continuous(labels = function(x) sprintf("%2dM", x / 1e6)) +
+  coord_flip() +
+  facet_grid(cell_type + dataset ~ method, scales = "free_y") +
+  ggtheme(legend.position = "right") +
+  theme(axis.text.y = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+p1 
+```
+
+Of course the number of mapped reads is direct function of library size (larger libraries will yield higher number of mapped reads), however, from the plot above a major difference in reads not mapping to any feature between Trim66-GFP and Trim66-PHD-NULL mutants: the latter data set shows an increased number of "unannotated" reads with respect to the former.
+
+As expected, polyA RNA-seq enriches for polyA transcripts, thus it should the lowest numbers of multimapping, unmapped and ambigously mapping reads.
+
+A somewhat remarkable difference can be observed between the number of multimapping reads in elongated spermatids and round spermatids total RNA-seq datasets. Similarly also the number of reads mapping to no feature is remarkably variable between the two datasets.
+
+# PCA analysis
+
+```{r import_mgi}
+mgi <- import("/g/boulard/Francesco/projects/trim66/data/references/MGI_mod.gff3",
+              colnames=c("Name", "description", "gene_id", "mgi_type", "type"),
+              feature.type = c("gene", "pseudogene"))
+names(mgi) <- mgi$gene_id
+```
+
+The plot below reports the PCA analysis of all datasets.
+
+```{r PCA, fig.width=12, fig.height=12}
+get_colData <- function(sample_sheet_path){
+  colData <- read_csv(sample_sheet_path, col_names = TRUE) %>%
+    dplyr::select(name, genotype) %>%
+    DataFrame
+  rownames(colData) <- colData$name
+  colData$genotype <- factor(colData$genotype, levels = c("WT", "KO"))
+  return(colData)
+}
+
+to_matrix <- function(df, var = "Geneid") {
+  rn <- df %>% pull({{ var }})
+  mat <- df %>% dplyr::select(-{{ var }}) %>% as.matrix
+  rownames(mat) <- rn
+  return(mat)
+}
+
+geneCount_files <- list.files(file.path(root, "alignments/star/"),
+                              pattern = "ReadsPerGene",
+                              recursive = TRUE,
+                              full.names = TRUE)
+geneCount_files <- grep(geneCount_files, pattern = "GSE", invert = TRUE, value = TRUE)
+
+grouped_count_mats <-   geneCount_files %>% 
+  map(read_tsv, skip = 4, col_names = FALSE, show_col_types = F) %>%
+  map(dplyr::select, X1, X2) %>%
+  map2(.y = geneCount_files, 
+       ~mutate(.x, 
+               dataset = basename(dirname(.y)), 
+               sample = basename(.y),
+               sample = sub(".*_((?:tMBAO|MBAO|mbaj|eGFP)[0-9]+)_.*", "\\1", sample))
+  ) %>%
+  purrr::reduce(bind_rows) %>%
+  group_by(dataset) 
+
+dataset_names <- grouped_count_mats %>%
+  group_keys() %>%
+  pull(dataset)
+
+singleCopyGenes_counts_mats <- grouped_count_mats %>%
+  group_split() %>%
+  set_names(dataset_names) %>%
+  map(dplyr::select, -dataset) %>%
+  map(pivot_wider, id_cols = X1, names_from = sample, values_from = X2) %>%
+  map(to_matrix, var = "X1")
+
+tpm <- function(counts, len) {
+  x <- counts/len
+  return(t(t(x)*1e6/colSums(x)))
+}
+
+singleCopyGenes_tpm <- singleCopyGenes_counts_mats %>%
+  map(function(mat){
+    mat <- mat[rowSums(mat) >= ncol(mat),]
+    r <- rownames(mat)
+    w <- width(mgi[r])
+    tpm(mat, w)
+  }) %>% 
+  set_names(names(singleCopyGenes_counts_mats))
+  
+# all_tpm <- singleCopyGenes_tpm %>%
+#   discard(function(x) "eGFP2" %in% colnames(x) || "eGFP6" %in% colnames(x)) %>%
+#   map(as.tibble, rownames = "gene_id") %>%
+#   purrr::reduce(inner_join, by = "gene_id") %>%
+#   to_matrix(var = "gene_id") 
+library(ggrepel)
+
+
+#  do_pca <- function(singleCopyGenes_tpm, pca_fun) map(singleCopyGenes_tpm, pca_fun) %>% 
+#   set_names(names(singleCopyGenes_counts_mats))
+# 
+# pca_all_genes <- function(mat) mat %>% 
+#   t %>% 
+#   scale(center = apply(., 2, mean), scale = apply(., 2, sd))  %>% 
+#   prcomp
+# 
+# all_pc <- do_pca(singleCopyGenes_tpm, pca_all_genes)
+
+
+all_pc <- map(singleCopyGenes_tpm, function(mat) mat %>% 
+                t %>% 
+                scale(center = apply(., 2, mean), scale = apply(., 2, sd))  %>% 
+                prcomp) %>% 
+  set_names(names(singleCopyGenes_counts_mats))
+
+
+
+map(seq_along(all_pc), function(i) {
+  pc <- all_pc[[i]]
+  dataset <- names(all_pc)[i]
+  sample_sheet_path <- sample_sheets[dataset]
+  sample_sheet <- get_colData(sample_sheet_path) %>% 
+    as_tibble(rownames = "sample_id") %>%
+    dplyr::select(sample_id, genotype)
+  
+  x <- pc$x
+  x <- x[,c(1,2)]
+  as_tibble(x, rownames = "sample_id") %>%
+    mutate(dataset = dataset) %>%
+    inner_join(sample_sheet)
+}) %>%
+  purrr::reduce(bind_rows) %>%
+  ggplot(aes(PC1, PC2, color = genotype, label = sample_id)) +
+  geom_point() +
+  geom_text_repel(max.overlaps = 25) +
+  facet_wrap(~ dataset, labeller = labeller(dataset = function(x) mains[x] )) +
+  scale_x_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  scale_color_manual(name = "Genotype", values = c(KO = "red", WT = "black"), labels = c(KO = "Trim66 mutants", WT = "Wild type")) +
+  ggtitle("All genes\nFilter for extremely low counts\nPCA on Z-score transformed TPM values") +
+  ggtheme() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.text = element_text(size = 14),
+        plot.title = element_text(size = 18))
+```
+
+The plot below shows the PCA analysis results using most variable genes.
+
+```{r PCA_most_variable_genes, fig.width=12, fig.height=12}
+t <- 0.9
+
+all_pc <- singleCopyGenes_counts_mats %>%
+  map(function(mat){
+    k <- rowSds(mat) > quantile(rowSds(mat), t)
+    mat <- mat[k,]
+    r <- rownames(mat)
+    w <- width(mgi[r])
+    tmat <- tpm(mat, w)
+  }) %>% 
+  map(function(mat) mat %>% t %>% scale(center = apply(., 2, mean), scale = apply(., 2, sd)) %>% prcomp)
+
+map(seq_along(all_pc), function(i) {
+  pc <- all_pc[[i]]
+  dataset <- names(all_pc)[i]
+  sample_sheet_path <- sample_sheets[dataset]
+  sample_sheet <- get_colData(sample_sheet_path) %>% 
+    as_tibble(rownames = "sample_id") %>%
+    dplyr::select(sample_id, genotype)
+  
+  x <- pc$x
+  x <- x[,c(1,2)]
+  as_tibble(x, rownames = "sample_id") %>%
+    mutate(dataset = dataset) %>%
+    inner_join(sample_sheet)
+}) %>%
+  purrr::reduce(bind_rows) %>%
+  ggplot(aes(PC1, PC2, color = genotype, label = sample_id)) +
+  geom_point() +
+  geom_text_repel(max.overlaps = 25) +
+  facet_wrap(~ dataset, labeller = labeller(dataset = function(x) mains[x] )) +
+  scale_x_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  scale_color_manual(name = "Genotype", values = c(KO = "red", WT = "black"), labels = c(KO = "Trim66 mutants", WT = "Wild type")) +
+  ggtitle(sprintf("Top %.2f%% most variable genes\nPCA on Z-score transformed TPM values", t * 100)) +
+  ggtheme() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.text = element_text(size = 14),
+        plot.title = element_text(size = 18))
+```
+
+# Differential expression with `DESeq2` { .tabset .tabset-pills }
+
+An aim of the transcriptomic data analysis is to find differentially expressed (DE) genes. Here DE genes were detected with two methods: `DESeq2` and `edgeR`. This section reports the results for the first methods, [below](#differential-expression-with-edger) `edgeR` results are reported and compared with the results presented in this section. 
+
+All the libraries were analyzed uniformly: wild type samples (WT) were compared to Trim66 mutant samples. Both for the `DESeq2` and `edgeR` analyses, any gene was considered DE if showing an FDR adjusted p-value lower than 0.05. For the `DESeq2` analysis, the test statistics used was the Wald t-test. 
+
+```{r deseq2_helpers}
+get_up_down <- function(deseq2_results, pvalue_thr, lfc_thr) {
+  x <- deseq2_results$log2FoldChange
+  
+  if ("svalue" %in% colnames(deseq2_results)){
+    y <- -log10(deseq2_results$svalue)
+  } else {
+    y <- -log10(deseq2_results$padj)
+  }
+  
+  k <- y > -log10(pvalue_thr)
+  up <- k & x > lfc_thr
+  down <- k & x < -lfc_thr
+  tot <- up | down
+  return(data.frame(row.names = rownames(deseq2_results), total=tot, up=up, down=down))
+}
+
+volcano_plot <- function(dds, deseq2_results, title, pvalue_thr = 0.05, lfc_thr = 1) {
+  
+  directions <- get_up_down(deseq2_results, pvalue_thr, lfc_thr)
+  up <- directions$up
+  down <- directions$down
+  
+  x <- deseq2_results$log2FoldChange
+  if ("svalue" %in% colnames(deseq2_results)) {
+    y <- -log10(deseq2_results$svalue)
+  } else {
+    y <- -log10(deseq2_results$padj)
+  }
+  
+  color <- rep("gray", length(x))
+  color[up] <- "red"
+  color[down] <- "blue"
+  
+  df <- data.frame(x, y, color)
+  
+  p <- ggplot(df, aes(x, y, color=color)) +
+    geom_hline(yintercept = -log10(pvalue_thr)) +
+    geom_vline(xintercept = c(-lfc_thr, lfc_thr)) +
+    geom_point(size=0.5) +
+    scale_color_manual(values=c(red="red", blue="blue", gray="gray"), ) +
+    xlab("logFC") + ylab("-log10(p-value)") + ggtitle(title) +
+    theme_bw()  +
+    ggtheme(legend.position = "none")
+  
+  return(p)
+}
+
+
+do_deseq <- function(count_mat, colData, main){
+  require(DESeq2)
+  dds <- DESeqDataSet(se = SummarizedExperiment(assays = SimpleList(counts = count_mat),
+                                                colData = DataFrame(colData)),
+                      design = ~ genotype)
+  dds <- DESeq(dds)
+  # MA <- plotMA(dds, main = main, returnData = TRUE)
+  
+  res <- lfcShrink(dds, coef = "genotype_KO_vs_WT")
+  volcano <- volcano_plot(dds, res, main, lfc_thr = 0)
+  
+  return(list(
+    dds=dds,
+    res=res,
+    volcano=volcano))
+}
+
+
+
+find_count_mat <- function(p, get_fn, ...) {
+  t <- read_tsv(p, comment = "#", ...)
+  for (pat in sample_name_paterns) {
+    patt <- paste0("[^t]", pat)
+    if(any(grepl(patt, basename(colnames(t))))) {
+      break
+    }
+  }
+  return(t %>% get_fn(pat))
+}
+
+```
+
+```{r call_deseq2_deg}
+analysis_folder <- "/g/boulard/Francesco/projects/trim66/analysis/"
+dds_paths <- list.files(file.path(analysis_folder, "rdata/deseq2/"), 
+                        pattern = "dds", 
+                        recursive = T, 
+                        full.names = T)
+
+all_dds <- lapply(dds_paths, readRDS) %>% 
+  set_names(basename(dirname(dds_paths)))
+
+all_res <- lapply(all_dds, results, name = "genotype_KO_vs_WT") %>%
+  set_names(names(all_dds))
+
+all_lfcShrink <- lapply(all_dds, lfcShrink, 
+                        coef = "genotype_KO_vs_WT", 
+                        type = "apeglm") %>% 
+  set_names(names(all_dds))
+
+all_vst <- lapply(all_dds, function(dds) vst(counts(dds))) %>% 
+  set_names(names(all_dds))
+
+all_deg_tables <- lapply(names(all_dds), function(dataset){
+  dds <- all_dds[[dataset]]
+  df <- all_lfcShrink[[dataset]]
+  
+  rr <- rowRanges(dds)
+  rr <- as.data.frame(mcols(rr)) %>%
+    dplyr::select(gene_id, Name, description, mgi_type)
+  
+  sbst <- subset(df, padj < 0.05)
+  
+  return(as_tibble(sbst, rownames = "gene_id") %>%
+           left_join(rr) %>%
+           dplyr::rename(ID = "gene_id"))
+}) %>% set_names(names(all_dds))
+```
+
+```{r PCA_deg, fig.width=12, fig.height=12}
+all_pc <- names(singleCopyGenes_counts_mats) %>%
+  map(function(dataset){
+    mat <- singleCopyGenes_counts_mats[[dataset]]
+    deg <- all_deg_tables[[dataset]] %>% pull(ID)
+    mat <- mat[deg,]
+    r <- rownames(mat)
+    w <- width(mgi[r])
+    tmat <- tpm(mat, w)
+  }) %>% 
+  map(function(mat) mat %>% t %>% scale(center = apply(., 2, mean), scale = apply(., 2, sd)) %>% prcomp) %>%
+  set_names(names(singleCopyGenes_counts_mats))
+
+map(seq_along(all_pc), function(i) {
+  pc <- all_pc[[i]]
+  dataset <- names(all_pc)[i]
+  sample_sheet_path <- sample_sheets[dataset]
+  
+  sample_sheet <- get_colData(sample_sheet_path) %>% 
+    as_tibble(rownames = "sample_id") %>%
+    dplyr::select(sample_id, genotype)
+  
+  x <- pc$x
+  x <- x[,c(1,2)]
+  as_tibble(x, rownames = "sample_id") %>%
+    mutate(dataset = dataset) %>%
+    inner_join(sample_sheet)
+}) %>%
+  purrr::reduce(bind_rows) %>%
+  ggplot(aes(PC1, PC2, color = genotype, label = sample_id)) +
+  geom_point() +
+  geom_text_repel(max.overlaps = 25) +
+  facet_wrap(~ dataset, labeller = labeller(dataset = function(x) mains[x] )) +
+  scale_x_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  scale_color_manual(name = "Genotype", values = c(KO = "red", WT = "black"), labels = c(KO = "Trim66 mutants", WT = "Wild type")) +
+  ggtitle("Differentially expressed genes\nPCA on Z-score transformed TPM values") +
+  ggtheme() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.text = element_text(size = 14),
+        plot.title = element_text(size = 18))
+```
+
+Below there are overview plots reporting the relationship between expression levels, log2 fold changes and p-values in all datasets.
+
+The MA plots below show the relationship between mean expression and log2 fold change. Red dots represent differentially expressed genes.
+
+```{r MAplots, fig.width=13, fig.height=8}
+qt_thr <- 0.98
+
+find_shape <- function(mean, lfc, qt) {
+  shape <- "regular"
+  if(mean > qt) {
+    shape <- "right"
+    if (lfc < -2) {
+      # bottom    
+      shape <- "bottom-right"
+    } else if (lfc > 2) {
+      # top
+      shape <- "top-right"
+    }
+  } else {
+    # left side
+    if (lfc < -2) {
+      # bottom
+      shape <- "bottom"
+    } else if (lfc > 2) {
+      # top
+      shape <- "top"
+    }
+  }
+  return(shape)
+}
+
+get_shape <- function (mean, lfc, qt_thr = 0.98, find_shape_fun = find_shape) {
+  
+  qt <- quantile(mean, qt_thr)
+  
+  shape <- rep("regular", length(mean))
+  
+  for (i in seq_along(mean)) {
+    m <- mean[i]  
+    l <- lfc[i]
+    if(!any(is.na(c(m,l)))) shape[i] <- find_shape_fun(m,l, qt)
+  }
+  
+  return(shape)
+
+}
+
+lapply(all_lfcShrink, DESeq2::plotMA, returnData = TRUE, alpha = 0.05) %>%
+  map(as_tibble, rownames = "gene_id") %>%
+  map2(.y = names(all_lfcShrink), ~mutate(.x, dataset = .y)) %>%
+  purrr::reduce(bind_rows) %>%
+  mutate(shape = get_shape(mean, lfc),
+         mean = if_else(mean > quantile(mean, qt_thr), quantile(mean, qt_thr), mean),
+         lfc = if_else(lfc < -2, -2, if_else(lfc > 2, 2, lfc)),
+         color = if_else(gene_id == "MGI:2152406", "Trim66", if_else(isDE, "DE", "none"))) %>%
+  ggplot(aes(x = mean, y = lfc, color = color, shape = shape)) +
+  geom_hline(yintercept = 0, color = "black") +
+  geom_point(size = 2.8) +
+  scale_color_manual(values = c(DE = "red",
+                                Trim66 = "blue",
+                                none = rgb(203/255, 203/255, 203/255, 0.5)),
+                     name = "") +
+  scale_shape_manual(values=c(regular = "\U25CF", 
+                              right = "\U25BA",
+                              bottom = "\U25BC",
+                              top = "\U25B2",
+                              `bottom-right` = "\U25E2",
+                              `top-right` = "\U25E5"
+                              ), guide = "none") +
+  facet_wrap(~ dataset, ncol = 3, labeller = labeller(dataset = function(labels) as.character(mains[labels]))) +
+  xlab("mean of normalized counts") +
+  ylab("log fold change") +
+  ggtheme()
+```
+
+The volcano plots below represent the relationship between log2 fold change and Wald t-test p-values used to assess the significance of the observed change in gene expression. Blue dots represent downregulated genes, while red ones represent upregulated genes.
+
+```{r volcano_plots, fig.width=13, fig.height=8}
+all_volcanos <- lapply(names(all_dds), function(dataset) {
+  dds <- all_dds[[dataset]]
+  res <- all_lfcShrink[[dataset]]
+  title <- mains[[dataset]]
+  
+  volcano_plot(dds, res, title = title, lfc_thr = 0)
+})
+
+plot_grid(plotlist = all_volcanos)
+```
+
+The table below reports the total number of DE genes and partitions them into up and down regulated.
+
+```{r number_of_deg}
+all_deg_tables %>%
+  map2(.y=names(all_deg_tables), ~mutate(.x, dataset = .y)) %>%
+  purrr::reduce(bind_rows) %>%
+  group_by(dataset) %>%
+  summarise(total = n(),
+            upregulated = sum(log2FoldChange > 0),
+            downregulated = sum(log2FoldChange < 0)) %>%
+  mutate(dataset = mains[dataset] %>% 
+           unlist %>% 
+           gsub(pattern = "\n", 
+                replacement = " ")) %>%
+  rename_with(Hmisc::capitalize)
+```
+
+The barplot below reports the number of DE gene for each gene type category. It shows that, regardless of the dataset, the majority of DE genes is classified as protein coding gene. The second most common gene type is lncRNA. In general more downregulated differentially expressed genes are observed. This observation is in apparent contrast with the repressive role hypothesized from Trim66.
+
+```{r deseq2_deg_summary_stats, fig.width=10, fig.height=8}
+all_deg_tables %>% 
+  map2(.y=names(all_deg_tables), 
+       ~mutate(.x, 
+               dataset = .y, 
+               direction = ifelse(log2FoldChange > 0, "up", "down")
+       )) %>%
+  purrr::reduce(bind_rows)%>%
+  dplyr::select(c(dataset, mgi_type, direction)) %>%
+  ggplot(aes(x = mgi_type, fill = direction)) +
+  geom_bar(position="dodge") +
+  facet_wrap(~ dataset, ncol = 3, labeller = labeller(
+    dataset = tibble(v=as.character(mains), 
+                     k=names(mains)) %>% 
+      pull(v, name = k)
+  )) +
+  coord_flip() +
+  ylab("# of genes") + xlab("Gene type") +
+  scale_fill_manual(name = "Direction", 
+                    labels = c(up = "Upregulated",
+                               down="Downregulated"),
+                    values = c(up = "red", 
+                               down="blue")) +
+  ggtheme() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+For each dataset, the DE genes table reporting gene name, log2 fold change and FDR adjusted p-value is provided. Two functional enriched analyses were performed for each set of DE gene (when detected): Gene Ontology terms over representation test and Reactome pathways over representation test. 
+
+For the GO term analysis, a table, dotplot and gene-concept network are given. The dotplot visualizes the top 30 GO terms enriched in a particular set of DE genes showing the relative abundance of genes associated to each term in the DE genes set (x axis) and the significance of the enrichment. In addition, a gene-concept network is  plotted to visualized the relationship between each enriched GO term and genes annotated to that term.
+
+```{r over_representation_analyses}
+all_topGO <- lapply(names(all_dds), function(dataset) {
+  
+  do_enrichment <- function(gene, universe) {
+    require(clusterProfiler)
+    if (length(gene) >= 5) {
+      ego <- enrichGO(gene          = gene,
+                      universe      = universe,
+                      OrgDb         = org.Mm.eg.db,
+                      keyType       = "MGI",
+                      ont           = "ALL",
+                      pAdjustMethod = "fdr",
+                      pvalueCutoff  = 0.05,
+                      qvalueCutoff  = 0.05,
+                      minGSSize     = 5,
+                      maxGSSize     = 500,
+                      pool          = TRUE,
+                      readable      = TRUE)
+      
+      df <- as.data.frame(ego)
+      if (nrow(df) == 0) ego <- NULL
+    } else {
+      ego <- NULL
+    }
+    return(ego)
+  }
+  
+  dds <- all_dds[[dataset]]
+  universe <- paste0("MGI:", rownames(dds))
+  
+  deg_table <- all_deg_tables[[dataset]]
+  
+  gene_up <- deg_table %>% 
+    filter(log2FoldChange > 0) %>%
+    mutate(ID = paste0("MGI:", ID)) %>% 
+    pull(ID)
+  ego_up <- do_enrichment(gene_up, universe)
+  
+  gene_down <- deg_table %>% 
+    filter(log2FoldChange < 0) %>%
+    mutate(ID = paste0("MGI:", ID)) %>% 
+    pull(ID)
+  ego_down <- do_enrichment(gene_down, universe)
+
+  return(list(upregulated = ego_up, 
+              downregulated = ego_down))
+}) %>% set_names(names(all_dds))
+
+all_reactome <- lapply(names(all_dds), function(dataset) {
+  
+  do_enrichment <- function(genes, universe) {
+    require(clusterProfiler)
+    if (length(genes) >= 5) {
+      x <- enrichPathway(gene          = genes, 
+                         universe      = universe,
+                         pvalueCutoff  = 0.05, 
+                         readable      = TRUE,
+                         organism      = "mouse",
+                         pAdjustMethod = "fdr")
+      
+      df <- as.data.frame(x)
+      if (nrow(df) == 0) x <- NULL 
+    } else {
+      x <- NULL
+    }
+    return(x)
+  }
+  
+  dds <- all_dds[[dataset]]
+  universe <- AnnotationDbi::select(org.Mm.eg.db, 
+                                    keys    = paste0("MGI:", rownames(dds)), 
+                                    columns = "ENTREZID", 
+                                    keytype = "MGI") %>%
+    drop_na() %>%
+    pull(ENTREZID)
+  
+  
+  gene_up <- all_deg_tables[[dataset]] %>% 
+    filter(log2FoldChange > 0) %>%
+    mutate(ID = paste0("MGI:", ID)) %>% 
+    pull(ID) %>%
+    AnnotationDbi::select(org.Mm.eg.db, 
+                          keys    = ., 
+                          columns = "ENTREZID", 
+                          keytype = "MGI") %>%
+    drop_na() %>%
+    pull(ENTREZID)
+  reactome_up <- do_enrichment(gene_up, universe)
+  
+  gene_down <- all_deg_tables[[dataset]] %>% 
+    filter(log2FoldChange < 0) %>%
+    mutate(ID = paste0("MGI:", ID)) %>% 
+    pull(ID) %>%
+    AnnotationDbi::select(org.Mm.eg.db, 
+                          keys    = ., 
+                          columns = "ENTREZID", 
+                          keytype = "MGI") %>%
+    drop_na() %>%
+    pull(ENTREZID)
+  reactome_down <- do_enrichment(gene_down, universe)
+  return(list(upregulated = reactome_up,
+              downregulated = reactome_down))
+}) %>% set_names(names(all_dds))
+```
+
+Use the buttons below to select the dataset to display.
+
+## TRIM66-GFP RS total-RNA-seq {.unnumbered}
+
+### DEG table {.unnumbered}
+
+```{r print_deg1, warning=TRUE}
+df1 <- all_deg_tables[[1]]
+if(nrow(df1) > 0) {
+  create_deseq_dt(df1, "trim66-gfp_deg_rs_total-rnaseq")
+} else {
+  warning("No DEG to show")
+}
+```
+
+### GO terms {.unnumbered}
+
+#### Upregulated
+
+```{r print_topGO1-upregulated, warning=TRUE}
+topGO_results1 <- all_topGO[[1]][["upregulated"]]
+if(!is.null(topGO_results1)) {
+  create_go_dt(topGO_results1, "trim66-gfp_go_rs_total-rnaseq-upregulated")
+  
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot1-upregulated, fig.height=4, fig.width=9}
+if(!is.null(topGO_results1)) {
+  dotplot(topGO_results1, showCategory = 30)
+}
+```
+
+```{r cnetplot_go1-upregulated, fig.height=10, fig.width=10}
+if (!is.null(topGO_results1)) cnetplot(topGO_results1, 
+                                      foldChange = df1 %>% 
+                                        pull(log2FoldChange, name = Name))
+```
+
+#### Downregulated
+
+```{r print_topGO1-downregulated, warning=TRUE}
+topGO_results1 <- all_topGO[[1]][["downregulated"]]
+if(!is.null(topGO_results1)) {
+  create_go_dt(topGO_results1, "trim66-gfp_go_rs_total-rnaseq-downregulated")
+  
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot1-downregulated, fig.height=4, fig.width=9}
+if(!is.null(topGO_results1)) {
+  dotplot(topGO_results1, showCategory = 30)
+}
+```
+
+```{r cnetplot_go1-downregulated, fig.height=10, fig.width=10}
+if (!is.null(topGO_results1)) cnetplot(topGO_results1, 
+                                      foldChange = df1 %>% 
+                                        pull(log2FoldChange, name = Name))
+```
+
+
+### Reactome {.unnumbered}
+
+#### Upregulated
+
+```{r print_reactome1-upregulated, warning=TRUE}
+reactome_df1 <- all_reactome[[1]][["upregulated"]]
+if(!is.null(reactome_df1)) {
+  create_reactome_dt(reactome_df1, "trim66-gfp_reactome_rs_total-rnaseq-upregulated")
+} else {
+  warning("No Reactome pathways to show")
+}
+```
+
+#### Downregulated
+
+```{r print_reactome1-downregulated, warning=TRUE}
+reactome_df1 <- all_reactome[[1]][["downregulated"]]
+if(!is.null(reactome_df1)) {
+  create_reactome_dt(reactome_df1, "trim66-gfp_reactome_rs_total-rnaseq-downregulated")
+} else {
+  warning("No Reactome pathways to show")
+}
+```
+
+
+[`r fa(name="arrow-up")` back to selection](#differential-expression-with-deseq2){style="float:right" class="btn btn-lg btn-primary"}
+
+## TRIM66-GFP RS polyA-RNA-seq {.unnumbered}
+
+### DEG table {.unnumbered}
+
+```{r print_deg2, warning=TRUE}
+df2 <- all_deg_tables[[2]]
+if(nrow(df2) > 0) {
+  create_deseq_dt(df2, "trim66-gfp_deg_rs_polya-rnaseq")
+} else {
+  warning("No DEG to show")
+}
+```
+
+### GO terms {.unnumbered}
+
+#### Upregulated
+
+```{r print_topGO2-upregulated, warning=TRUE}
+topGO_results2 <- all_topGO[[2]][["upregulated"]]
+if(!is.null(topGO_results2)) {
+  create_go_dt(topGO_results2, "trim66-gfp_go_rs_polya-rnaseq-upregulated")
+  
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot2-upregulated, fig.height=4, fig.width=9}
+if(!is.null(topGO_results2)) {
+  dotplot(topGO_results2, showCategory = 30)
+}
+```
+
+```{r cnetplot_go2-upregulated, fig.height=10, fig.width=10}
+if (!is.null(topGO_results2)) cnetplot(topGO_results2, 
+                                      foldChange = df2 %>% 
+                                        pull(log2FoldChange, name = Name))
+```
+
+#### Downregulated
+
+```{r print_topGO2-downregulated, warning=TRUE}
+topGO_results2 <- all_topGO[[2]][["downregulated"]]
+if(!is.null(topGO_results2)) {
+  create_go_dt(topGO_results2, "trim66-gfp_go_rs_polya-rnaseq-downregulated")
+  
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot2-downregulated, fig.height=4, fig.width=9}
+if(!is.null(topGO_results2)) {
+  dotplot(topGO_results2, showCategory = 30)
+}
+```
+
+```{r cnetplot_go2-downregulated, fig.height=10, fig.width=10}
+if (!is.null(topGO_results2)) cnetplot(topGO_results2, 
+                                      foldChange = df2 %>% 
+                                        pull(log2FoldChange, name = Name))
+```
+
+
+### Reactome {.unnumbered}
+
+#### Upregulated
+
+```{r print_reactome2-upregulated, warning=TRUE}
+reactome_df2 <- all_reactome[[2]][["upregulated"]]
+if(!is.null(reactome_df2)) {
+  create_reactome_dt(reactome_df2, "trim66-gfp_reactome_rs_polya-rnaseq-upregulated")
+} else {
+  warning("No Reactome pathways to show")
+}
+```
+
+#### Downregulated
+
+```{r print_reactome2-downregulated, warning=TRUE}
+reactome_df2 <- all_reactome[[2]][["downregulated"]]
+if(!is.null(reactome_df2)) {
+  create_reactome_dt(reactome_df2, "trim66-gfp_reactome_rs_polya-rnaseq-downregulated")
+} else {
+  warning("No Reactome pathways to show")
+}
+```
+
+[`r fa(name="arrow-up")` back to selection](#differential-expression-with-deseq2){style="float:right" class="btn btn-lg btn-primary"}
+
+## TRIM66-GFP ES total-RNA-seq - no eGFP2, eGFP3 and eGFP6 {.unnumbered}
+
+### DEG table {.unnumbered}
+
+```{r print_deg3, warning=TRUE}
+df3 <- all_deg_tables[[3]]
+if(nrow(df3) > 0) {
+  create_deseq_dt(df3, "trim66-gfp_deg_es_total-rnaseq-noeGFP2-noeGFP3-noeGFP6")
+} else {
+  warning("No DEG to show")
+}
+```
+
+### GO terms {.unnumbered}
+
+#### Upregulated
+
+```{r print_topGO3-upregulated, warning=TRUE}
+topGO_results3 <- all_topGO[[3]][["upregulated"]]
+if(!is.null(topGO_results3)) {
+  create_go_dt(topGO_results3, "trim66-gfp_go_es_total-rnaseq-noeGFP2-noeGFP3-noeGFP6-upregulated")
+  
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot3-upregulated, fig.height=4, fig.width=9}
+if(!is.null(topGO_results3)) {
+  dotplot(topGO_results3, showCategory = 30)
+}
+```
+
+```{r cnetplot_go3-upregulated, fig.height=10, fig.width=10}
+if (!is.null(topGO_results3)) cnetplot(topGO_results3, 
+                                      foldChange = df3 %>% 
+                                        pull(log2FoldChange, name = Name))
+```
+
+#### Downregulated
+
+```{r print_topGO3-downregulated, warning=TRUE}
+topGO_results3 <- all_topGO[[3]][["downregulated"]]
+if(!is.null(topGO_results3)) {
+  create_go_dt(topGO_results3, "trim66-gfp_go_es_total-rnaseq-noeGFP2-noeGFP3-noeGFP6-downregulated")
+  
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot3-downregulated, fig.height=4, fig.width=9}
+if(!is.null(topGO_results3)) {
+  dotplot(topGO_results3, showCategory = 30)
+}
+```
+
+```{r cnetplot_go3-downregulated, fig.height=10, fig.width=10}
+if (!is.null(topGO_results3)) cnetplot(topGO_results3, 
+                                      foldChange = df3 %>% 
+                                        pull(log2FoldChange, name = Name))
+```
+
+### Reactome {.unnumbered}
+
+#### Upregulated
+
+```{r print_reactome3-upregulated, warning=TRUE}
+reactome_df3 <- all_reactome[[3]][["upregulated"]]
+if(!is.null(reactome_df3)) {
+  create_reactome_dt(reactome_df3, "trim66-gfp_reactome_es_total-rnaseq-noeGFP2-noeGFP3-noeGFP6-upregulated")
+} else {
+  warning("No Reactome pathways to show")
+}
+```
+
+#### Downregulated
+
+```{r print_reactome3-downregulated, warning=TRUE}
+reactome_df3 <- all_reactome[[3]][["downregulated"]]
+if(!is.null(reactome_df3)) {
+  create_reactome_dt(reactome_df3, "trim66-gfp_reactome_es_total-rnaseq-noeGFP2-noeGFP3-noeGFP6-downregulated")
+} else {
+  warning("No Reactome pathways to show")
+}
+```
+
+[`r fa(name="arrow-up")` back to selection](#differential-expression-with-deseq2){style="float:right" class="btn btn-lg btn-primary"}
+
+
+## TRIM66-GFP ES total-RNA-seq - no eGFP2 {.unnumbered}
+
+### DEG table {.unnumbered}
+
+```{r print_deg4, warning=TRUE}
+df4 <- all_deg_tables[[4]]
+if(nrow(df4) > 0) {
+  create_deseq_dt(df4, "trim66-gfp_deg_es_total-rnaseq-noeGFP2")
+} else {
+  warning("No DEG to show")
+}
+```
+
+### GO terms {.unnumbered}
+
+#### Upregulated
+
+```{r print_topGO4-upregulated, warning=TRUE}
+topGO_results4 <- all_topGO[[4]][["upregulated"]]
+if(!is.null(topGO_results4)) {
+  create_go_dt(topGO_results4, "trim66-gfp_go_es_total-rnaseq-noeGFP2-upregulated")
+  
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot4-upregulated, fig.height=4, fig.width=9}
+if(!is.null(topGO_results4)) {
+  dotplot(topGO_results4, showCategory = 30)
+}
+```
+
+```{r cnetplot_go4-upregulated, fig.height=10, fig.width=10}
+if (!is.null(topGO_results4)) cnetplot(topGO_results4, 
+                                      foldChange = df4 %>% 
+                                        pull(log2FoldChange, name = Name))
+```
+
+#### Downregulated
+
+```{r print_topGO4-downregulated, warning=TRUE}
+topGO_results4 <- all_topGO[[4]][["downregulated"]]
+if(!is.null(topGO_results4)) {
+  create_go_dt(topGO_results4, "trim66-gfp_go_es_total-rnaseq-noeGFP2-downregulated")
+  
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot4-downregulated, fig.height=4, fig.width=9}
+if(!is.null(topGO_results4)) {
+  dotplot(topGO_results4, showCategory = 30)
+}
+```
+
+```{r cnetplot_go4-downregulated, fig.height=10, fig.width=10}
+if (!is.null(topGO_results4)) cnetplot(topGO_results4, 
+                                      foldChange = df4 %>% 
+                                        pull(log2FoldChange, name = Name))
+```
+
+### Reactome {.unnumbered}
+
+#### Upregulated
+
+```{r print_reactome4-upregulated, warning=TRUE}
+reactome_df4 <- all_reactome[[4]][["upregulated"]]
+if(!is.null(reactome_df4)) {
+  create_reactome_dt(reactome_df4, "trim66-gfp_reactome_es_total-rnaseq-noeGFP2-upregulated")
+} else {
+  warning("No Reactome pathways to show")
+}
+```
+
+#### Downregulated
+
+```{r print_reactome4-downregulated, warning=TRUE}
+reactome_df4 <- all_reactome[[4]][["downregulated"]]
+if(!is.null(reactome_df4)) {
+  create_reactome_dt(reactome_df4, "trim66-gfp_reactome_es_total-rnaseq-noeGFP2-downregulated")
+} else {
+  warning("No Reactome pathways to show")
+}
+```
+
+[`r fa(name="arrow-up")` back to selection](#differential-expression-with-deseq2){style="float:right" class="btn btn-lg btn-primary"}
+
+## TRIM66-GFP ES totalRNA-seq - all samples {.unnumbered}
+
+### DEG table {.unnumbered}
+
+```{r print_deg5, warning=TRUE}
+df5 <- all_deg_tables[[5]]
+if(nrow(df5) > 0) {
+  create_deseq_dt(df5, "trim66-gfp_deg_es_total-rnaseq")
+} else {
+  warning("No DEG to show")
+}
+```
+
+
+### GO terms {.unnumbered}
+
+#### Upregulated
+
+```{r print_topGO5-upregulated, warning=TRUE}
+topGO_results5 <- all_topGO[[5]][["upregulated"]]
+if(!is.null(topGO_results5)) {
+  create_go_dt(topGO_results5, "trim66-gfp_go_es_total-rnaseq-upregulated")
+  
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot5-upregulated, fig.height=4, fig.width=9}
+if(!is.null(topGO_results5)) {
+  dotplot(topGO_results5, showCategory = 30)
+}
+```
+
+```{r cnetplot_go5-upregulated, fig.height=10, fig.width=10}
+if (!is.null(topGO_results5)) cnetplot(topGO_results5, 
+                                      foldChange = df5 %>% 
+                                        pull(log2FoldChange, name = Name))
+```
+
+#### Downregulated
+
+```{r print_topGO5-downregulated, warning=TRUE}
+topGO_results5 <- all_topGO[[5]][["downregulated"]]
+if(!is.null(topGO_results5)) {
+  create_go_dt(topGO_results5, "trim66-gfp_go_es_total-rnaseq-downregulated")
+  
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot5-downregulated, fig.height=4, fig.width=9}
+if(!is.null(topGO_results5)) {
+  dotplot(topGO_results5, showCategory = 30)
+}
+```
+
+```{r cnetplot_go5-downregulated, fig.height=10, fig.width=10}
+if (!is.null(topGO_results5)) cnetplot(topGO_results5, 
+                                      foldChange = df5 %>% 
+                                        pull(log2FoldChange, name = Name))
+```
+
+### Reactome {.unnumbered}
+
+#### Upregulated
+
+```{r print_reactome5-upregulated, warning=TRUE}
+reactome_df5 <- all_reactome[[5]][["upregulated"]]
+if(!is.null(reactome_df5)) {
+  create_reactome_dt(reactome_df5, "trim66-gfp_reactome_es_total-rnaseq-upregulated")
+} else {
+  warning("No Reactome pathways to show")
+}
+```
+
+#### Downregulated
+
+```{r print_reactome5-downregulated, warning=TRUE}
+reactome_df5 <- all_reactome[[5]][["downregulated"]]
+if(!is.null(reactome_df5)) {
+  create_reactome_dt(reactome_df5, "trim66-gfp_reactome_es_total-rnaseq-downregulated")
+} else {
+  warning("No Reactome pathways to show")
+}
+```
+
+[`r fa(name="arrow-up")` back to selection](#differential-expression-with-deseq2){style="float:right" class="btn btn-lg btn-primary"}
+
+## TRIM66-PHD-null RS total-RNA-seq {.unnumbered}
+
+### DEG table {.unnumbered}
+
+```{r print_deg6, warning=TRUE}
+df6 <- all_deg_tables[[6]]
+if(nrow(df6) > 0) {
+  create_deseq_dt(df6, "trim66-phd-null_deg_rs_total-rnaseq")
+} else {
+  warning("No DEG to show")
+}
+```
+
+
+### GO terms {.unnumbered}
+
+#### Upregulated
+
+```{r print_topGO6-upregulated, warning=TRUE}
+topGO_results6 <- all_topGO[[6]][["upregulated"]]
+if(!is.null(topGO_results6)) {
+  create_go_dt(topGO_results6, "trim66-phd-null_go_rs_total-rnaseq-upregulated")
+  
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot6-upregulated, fig.height=4, fig.width=9}
+if(!is.null(topGO_results6)) {
+  dotplot(topGO_results6, showCategory = 30)
+}
+```
+
+```{r cnetplot_go6-upregulated, fig.height=10, fig.width=10}
+if (!is.null(topGO_results6)) cnetplot(topGO_results6, 
+                                      foldChange = df6 %>% 
+                                        pull(log2FoldChange, name = Name))
+```
+
+#### Downregulated
+
+```{r print_topGO6-downregulated, warning=TRUE}
+topGO_results6 <- all_topGO[[6]][["downregulated"]]
+if(!is.null(topGO_results6)) {
+  create_go_dt(topGO_results6, "trim66-phd-null_go_rs_total-rnaseq-downregulated")
+  
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot6-downregulated, fig.height=4, fig.width=9}
+if(!is.null(topGO_results6)) {
+  dotplot(topGO_results6, showCategory = 30)
+}
+```
+
+```{r cnetplot_go6-downregulated, fig.height=10, fig.width=10}
+if (!is.null(topGO_results6)) cnetplot(topGO_results6, 
+                                      foldChange = df6 %>% 
+                                        pull(log2FoldChange, name = Name))
+```
+
+### Reactome {.unnumbered}
+
+#### Upregulated
+
+```{r print_reactome6-upregulated, warning=TRUE}
+reactome_df6 <- all_reactome[[6]][["upregulated"]]
+if(!is.null(reactome_df6)) {
+  create_reactome_dt(reactome_df6, "trim66-phd-null_reactome_rs_total-rnaseq-upregulated")
+} else {
+  warning("No Reactome pathways to show")
+}
+```
+
+#### Downregulated
+
+```{r print_reactome6-downregulated, warning=TRUE}
+reactome_df6 <- all_reactome[[6]][["downregulated"]]
+if(!is.null(reactome_df6)) {
+  create_reactome_dt(reactome_df6, "trim66-phd-null_reactome_rs_total-rnaseq-downregulated")
+} else {
+  warning("No Reactome pathways to show")
+}
+```
+
+[`r fa(name="arrow-up")` back to selection](#differential-expression-with-deseq2){style="float:right" class="btn btn-lg btn-primary"}
+
+## {-}
+
+# Histones, transition proteins and protamines expression
+
+The expression of histones, transition proteins and protamines was compared across the two total RNA-seq dataset generated in round and elongating spermatids stages. During sperm maturation, histone proteins are replaced first with transtition proteins, then with protamines. This process is aided by specific histone variants with testis specific expression.
+
+To allow the comparison raw read count data were normalized as follow:
+
+  - each data matrix was transformed using variance stabilizing transformation independently. This should ease the dependency between read count mean and variance.
+  - the two data matrices were joined on a gene-wise manner (row-wise)
+  - on the resulting matrix, Z-score transformation was applied over each gene to center its expression value around zero and scale its standard deviation to one.
+
+```{r plot_histones-transition_proteins-protamines_trim66, fig.height=18, fig.width=12}
+histones <- subset(mcols(mgi), (grepl("histone", description) & !grepl("deacetylase|linker|binding|chaperone|methyl|homolog|kinase|regulator|aminotransferase|reader|factor", description) & grepl("protein", mgi_type)))  %>%
+  as_tibble() %>%
+  mutate(variant = sub("^(H[1-4][A-Z]?).*", "\\1", description)) %>%
+  filter(grepl("^H[1-4]", variant))
+
+protamines <- subset(mcols(mgi), gene_id %in% c("MGI:97765", "MGI:97766", "MGI:106601")) %>%
+  as_tibble
+
+transition_proteins <- subset(mcols(mgi), gene_id %in% c("MGI:98784", "MGI:98785")) %>%
+  as_tibble
+
+trim66 <- mcols(mgi) %>%
+  as_tibble %>%
+  filter(gene_id == "MGI:2152406")
+
+ids <- c(histones$gene_id, 
+         transition_proteins$gene_id, 
+         protamines$gene_id, 
+         trim66$gene_id)
+
+get_samples <- function(dds, g) colData(dds) %>% 
+  as_tibble(rownames = "rn") %>%
+  filter(genotype == g) %>%
+  dplyr::select(rn, name)
+
+mean_centering <- function(mat) {
+  tmat <- t(mat)
+  t(scale(tmat, center = apply(tmat, 2, mean), scale = apply(tmat, 2, sd)))
+}
+
+wt_rs <- get_samples(all_dds[[1]], "WT")
+wt_es <- get_samples(all_dds[[3]], "WT")
+
+ko_rs <- get_samples(all_dds[[1]], "KO")
+ko_es <- get_samples(all_dds[[3]], "KO")
+
+rs_samples <- bind_rows(wt_rs, ko_rs)
+es_samples <- bind_rows(wt_es, ko_es)
+
+wt_samples <- bind_rows(wt_rs, wt_es)
+ko_samples <- bind_rows(ko_rs, ko_es)
+
+rs <- all_vst[[1]] # totalRNA-seq RS 
+es <- all_vst[[3]] # totalRNA-seq ES no-eGFP2
+
+
+keep_ids <- intersect(
+  intersect(rownames(rs), ids),
+  intersect(rownames(es), ids)
+)
+
+rs <- rs[rownames(rs) %in% keep_ids, ]
+nrs <- as.numeric(sub(".*tMBAO([0-9]+).*", "\\1", colnames(rs)))
+rs <- rs[,order(nrs)]
+
+es <- es[rownames(es) %in% keep_ids,]
+nes <- as.numeric(sub(".*eGFP([0-9]+).*", "\\1", colnames(es)))
+es <- es[,order(nes)]
+
+m <- cbind(rs,es)
+colnames(m) <- sub(".*((?:tMBAO|eGFP)[0-9]+).*", "\\1", colnames(m))
+m <- mean_centering(m)
+
+sample <- vector("character", ncol(m))
+sample[colnames(m) %in% rs_samples$name] <- "Round spermatids"
+sample[colnames(m) %in% es_samples$name] <- "Elongated spermatids"
+
+genotype <- vector("character", ncol(m))
+genotype[colnames(m) %in% wt_samples$name] <- "WT"
+genotype[colnames(m) %in% ko_samples$name] <- "KO"
+
+ha <- HeatmapAnnotation(`Stage` = sample,
+                        `Genotype` = genotype,
+                        col = list(`Stage` = c(`Round spermatids`="green",
+                                               `Elongated spermatids`="red"),
+                                   `Genotype` = c(`WT`="brown",
+                                                  `KO`="orange")))
+
+histone_h2a <- histones %>% 
+  filter(variant == "H2A") %>%
+  dplyr::select(-variant)
+
+histone_h2b <- histones %>% 
+  filter(variant == "H2B") %>%
+  dplyr::select(-variant)
+
+histone_h3 <- histones %>% 
+  filter(variant == "H3") %>%
+  dplyr::select(-variant)
+
+histone_h4 <- histones %>% 
+  filter(variant == "H4") %>%
+  dplyr::select(-variant)
+
+mmh <- 5
+
+as_matrix <- function(df) {
+  if ("description" %in% colnames(df)){
+    rn <- paste(df %>% pull(Name), 
+                df %>% pull(description), 
+                sep =  " - ")
+    mat <- df %>% dplyr::select(-c(Name, description)) %>% as.matrix
+  }else{
+    rn <- df %>% pull(Name)
+    mat <- df %>% dplyr::select(-Name) %>% as.matrix
+  }
+  rownames(mat) <- rn
+  return(mat)
+}
+
+get_matrix <- function(m, h) m %>% 
+  as_tibble(rownames = "rn") %>% 
+  inner_join(h, by = c(rn = "gene_id")) %>%
+  dplyr::select(-c(rn, mgi_type, type)) %>%
+  as_matrix
+
+mh2a <- get_matrix(m, histone_h2a) 
+h1 <- Heatmap(mh2a, 
+              height = unit(mmh, "mm")*nrow(mh2a), 
+              width = unit(mmh, "mm")*ncol(mh2a),
+              name = "z", 
+              cluster_columns = F, 
+              show_row_names = T, 
+              row_title = "H2A",
+              top_annotation = ha,
+              row_names_max_width = max_text_width(
+                rownames(mh2a), 
+                gp = gpar(fontsize = 12)
+              ))
+
+mh2b <- get_matrix(m, histone_h2b) 
+h2 <- Heatmap(mh2b, 
+              height = unit(mmh, "mm")*nrow(mh2a), 
+              width = unit(mmh, "mm")*ncol(mh2a),
+              name = "z", 
+              cluster_columns = F, 
+              show_row_names = T, 
+              row_title = "H2B",
+              row_names_max_width = max_text_width(
+                rownames(mh2b), 
+                gp = gpar(fontsize = 12)
+              ))
+
+
+mh3 <- get_matrix(m, histone_h3) 
+h3 <- Heatmap(mh3, 
+              height = unit(mmh, "mm")*nrow(mh3), 
+              width = unit(mmh, "mm")*ncol(mh2a),
+              name = "z", 
+              cluster_columns = F, 
+              show_row_names = T, 
+              row_title = "H3",
+              row_names_max_width = max_text_width(
+                rownames(mh3), 
+                gp = gpar(fontsize = 12)
+              ))
+
+mh4 <- get_matrix(m, histone_h4) 
+h4 <- Heatmap(mh4, 
+              height = unit(mmh, "mm")*nrow(mh4), 
+              width = unit(mmh, "mm")*ncol(mh2a), 
+              name = "z", 
+              cluster_columns = F, 
+              show_row_names = T,
+              row_title = "H4",
+              row_names_max_width = max_text_width(
+                rownames(mh4), 
+                gp = gpar(fontsize = 12)
+              ))
+
+mtp <- get_matrix(m, transition_proteins) 
+h5 <- Heatmap(mtp,
+              height = unit(mmh, "mm")*nrow(mtp), 
+              width = unit(mmh, "mm")*ncol(mh2a), 
+              name = "z", 
+              cluster_columns = F, 
+              row_title = "TP", 
+              show_row_names = T,
+              row_names_max_width = max_text_width(
+                rownames(mtp), 
+                gp = gpar(fontsize = 12)
+              ))
+
+mp <- get_matrix(m, protamines) 
+h6 <- Heatmap(mp, 
+              height = unit(mmh, "mm")*nrow(mp), 
+              width = unit(mmh, "mm")*ncol(mh2a), 
+              name = "z", 
+              cluster_columns = F, 
+              row_title = "P", 
+              show_row_names = T,
+              row_names_max_width = max_text_width(
+                rownames(mp), 
+                gp = gpar(fontsize = 12)
+              ))
+
+mt66 <- get_matrix(m, trim66)
+h7 <- Heatmap(mt66, 
+              height = unit(mmh, "mm")*nrow(mt66), 
+              width = unit(mmh, "mm")*ncol(mh2a), 
+              name = "z", 
+              cluster_columns = F, 
+              cluster_rows = F,
+              row_title = "T66", 
+              show_row_names = T,
+              row_names_max_width = max_text_width(
+                rownames(mt66), 
+                gp = gpar(fontsize = 12)
+              ))
+
+
+htlist <- h1 %v% h2 %v% h3 %v% h4 %v% h5 %v% h6 %v% h7
+draw(htlist, padding = unit(c(10, 2, 2, 2), "mm"))
+
+```
+
+The heatmap above shows that histones, transition proteins and protamines expression is largely unaffected by the genetic background because there is no significative change in expression between mutants and wild type samples. 
+
+By comparing the two stages, however, peculiar expression patterns emerge: 
+
+  - variants of histones H2A and H2B can be separated in two clusters, one with increased expression in elongating spermatids and reduced in round spermatids and the other one with the opposite pattern
+  - histone H3 shows a more heterogenous pattern of expression with an overall lower reduction in elongating spermatids
+  - histone H4, on the other hand is generally increased in elongating spermatids coherently with its demonstrated role in initiating and assisting histones to protamines transition
+  - both transition proteins and protamines show a strongly increased expression in elongating spermatids.
+
+# tRNA { .tabset .tabset-pills }
+
+The expression of tRNA molecules was assessed using annotations from GtRNAdb. The aforementioned genomic alignments were used to quantify coverage of genomic coordinates annotated by this database. Bedtools was used to carry out this task. Finally, `DESeq2` was used to assess differential expression between KO and WT samples. 
+
+Simialrly to lnRNA and protein coding genes describe above, a tRNA was considered DE if showing a FDR adjusted Wald t-test p-value lower than 0.05. Although some significantly DE tRNA are reported in the sections below, it is worth noticing that their log2 fold change is in the order of 10^-6^.
+
+```{r tRNA_deseq2, fig.width=13, fig.height=8}
+tRNA_coverage_files <- list.files(file.path(root, "tRNA_coverage"), 
+                                  pattern = "tRNA_matrix.txt", 
+                                  full.names = T, 
+                                  recursive = T)
+tRNA_coverage_files <- grep("GSE", tRNA_coverage_files, value = TRUE, invert = TRUE)
+
+datasets_tRNA <- basename(dirname(tRNA_coverage_files))
+
+get_count_mat_tRNA <- function(t, sample_name_pattern) {
+  return(t %>%
+           rename_with(function(x, pat) {
+             bn <- basename(x)
+             bn <- sub(pat, "\\1", bn)
+             return(bn)
+           }, pat = sprintf(".*(%s[0-9]+).*", sample_name_pattern)) %>%
+           dplyr::select(Name, starts_with(sample_name_pattern)) %>%
+           mutate(across(starts_with(sample_name_pattern), as.integer)) %>%
+           to_matrix(var = "Name"))
+}
+
+all_tRNA_matrix <- tRNA_coverage_files %>%
+  map(find_count_mat, get_fn = get_count_mat_tRNA) %>%
+  set_names(datasets_tRNA) 
+
+all_sample_sheets_tRNA <- datasets_tRNA %>%
+  map(function(p) {
+    sp <- sample_sheets[grepl(paste0(p,"$"), names(sample_sheets))]
+    return(get_colData(sp))
+  }) %>%
+  set_names(datasets_tRNA)
+
+mains_tRNA <- mains[match(datasets_tRNA, names(mains))]
+
+all_dds <- pmap(list(all_tRNA_matrix, all_sample_sheets_tRNA, mains_tRNA), do_deseq)
+all_de_trna <- lapply(all_dds, function(O) subset(O$res, padj < 0.05) %>% as.data.frame)
+plot_grid(plotlist = lapply(all_dds, `[[`, "volcano"))
+
+```
+
+Use the buttons below to select the results to display.
+
+## TRIM66-GFP RS total-RNA-seq {.unnumbered}
+
+```{r print_de_tRNA1, warning=TRUE}
+df <- all_de_trna[[1]]
+if(nrow(df) > 0) {
+  create_trna_dt(df, "trim66-gfp_de_trna_rs_total-rnaseq")
+} else {
+  warning("No DE tRNA to show")
+}
+```
+
+## TRIM66-GFP RS polyA-RNA-seq {.unnumbered}
+ 
+```{r print_de_tRNA2, warning=TRUE}
+df <- all_de_trna[[2]]
+if(nrow(df) > 0) {
+  create_trna_dt(df, "trim66-gfp_de_trna_rs_polya-rnaseq")
+} else {
+  warning("No DE tRNA to show")
+}
+```
+
+## TRIM66-GFP ES total-RNA-seq - no eGFP2, eGFP3 and eGFP6 {.unnumbered}
+
+```{r print_de_trna3, warning=TRUE}
+df <- all_de_trna[[3]]
+if(nrow(df) > 0) {
+  create_trna_dt(df, "trim66-gfp_de_rna_es_total-rnaseq_noeGFP2_noeGFP3_noeGFP6")
+} else {
+  warning("No DE tRNA to show")
+}
+```
+
+
+## TRIM66-GFP ES total-RNA-seq - no eGFP2 {.unnumbered}
+
+```{r print_de_trna4, warning=TRUE}
+df <- all_de_trna[[4]]
+if(nrow(df) > 0) {
+  create_trna_dt(df, "trim66-gfp_de_rna_es_total-rnaseq_noeGFP2")
+} else {
+  warning("No DE tRNA to show")
+}
+```
+
+## TRIM66-GFP ES totalRNA-seq - all samples {.unnumbered}
+
+```{r print_de_trna5, warning=TRUE}
+df <- all_de_trna[[5]]
+if(nrow(df) > 0) {
+  create_trna_dt(df, "trim66-gfp_de_trna_es_total-rnaseq")
+} else {
+  warning("No DE tRNA to show")
+}
+```
+
+## TRIM66-PHD-null RS total-RNA-seq {.unnumbered}
+
+```{r print_de_trna6, warning=TRUE}
+df <- all_de_trna[[6]]
+if(nrow(df) > 0) {
+  create_trna_dt(df, "trim66-phd-null_de_trna_rs_total-rnaseq")
+} else {
+  warning("No DE tRNA to show")
+}
+```
+
+## {-}
+
+# Transposable elements (TE)
+
+Changs in TE expression was quantified with two methods: first, with an alignment-free method called SalmonTE, second with a STAR-based method which we will call STAR-TE. 
+
+## SalmonTE
+
+SalmonTE uses Salmon to perform the rapid alignment-free quantification of TE elements. It then inputs the quantification table into `DESeq2` to assess differential expression in the quantified transcripts. Finally it aggregates gene-wise counts both at family and clade level to provide a global overview of the transcriptional state of TE elements in samples under analysis. 
+
+The boxplot below shows the log2 fold change for each quantified gene aggregated at the clade level.
+
+```{r plot_salonTE_results, fig.width=10, fig.height=7}
+salmonTE_results <- list.files(file.path(root, "salmonTE/de_analysis/"), 
+                               pattern = "results.csv", 
+                               full.names = T, 
+                               recursive = T)
+
+salmonTE_results %>% 
+  map(read_csv, col_names = T) %>% 
+  map2(.y = salmonTE_results, ~mutate(.x, dataset = basename(dirname(.y)))) %>%
+  purrr::reduce(bind_rows) %>%
+  ggplot(aes(clade, log2FoldChange, color = padj < 0.05)) +
+  geom_boxplot(outlier.shape = NA, color = "black") +
+  geom_jitter(size = 0.5, width = 0.2) +
+  geom_hline(yintercept = 0, color = "dodgerblue") +
+  facet_wrap(~dataset, ncol = 3, labeller = labeller(dataset = c(
+    TRIM66_Apr2021="TRIM66-GFP\nRS total RNA-seq",
+    TRIM66_Dec2020="TRIM66-GFP\nRS polyA RNA-seq",
+    TRIM66_Oct2020="TRIM66-PHD-null\nRS total RNA-seq",
+    TRIM66_elongatedSpermatids_Ago2021="TRIM66-GFP\nES total RNA-seq",
+    TRIM66_elongatedSpermatids_Ago2021_noeGFP2="TRIM66-GFP\nES total RNA-seq\nno eGFP2"
+  ))) +
+  scale_color_manual(values = c(`TRUE` = rgb(1, 0, 0, 0.5), 
+                                `FALSE` = rgb(0, 0, 0, 0.5), 
+                                `NA` = rgb(0.5, 0.5, 0.5, 0.5))) +
+  ggtheme() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### MA-plot
+ <!--
+# {r salmonTE_MAplot}
+# 
+# salmonTE_dat_files <- list.files(file.path(root, "salmonTE/de_analysis/"), 
+#                                  pattern = "data.Rdata", 
+#                                  full.names = T, 
+#                                  recursive = T)
+# 
+# plots <- lapply(salmonTE_dat_files, function(x) {
+#   d <- basename(dirname(x))
+#   m <- mains[[d]]
+#   e <- new.env()
+#   load(x, envir = e)
+#   dat <- get("dat", envir = e)
+#   ma <- dat$summary$ma.plot
+#   return(ma + 
+#            ggtitle(m) +
+#            ggtheme())
+# })
+# 
+# plot_grid(plotlist = plots)
+# 
+#
+-->
+
+```{r salmonTE_MAplot, fig.width=10, fig.height=7}
+salmonTE_results %>% 
+  map(read_csv, col_names = T) %>% 
+  map2(.y = salmonTE_results, ~mutate(.x, dataset = basename(dirname(.y)))) %>%
+  purrr::reduce(bind_rows) %>%
+  
+  mutate(shape = get_shape(baseMean, log2FoldChange),
+         baseMean = if_else(baseMean > quantile(baseMean, qt_thr), quantile(baseMean, qt_thr), baseMean),
+         log2FoldChange = if_else(log2FoldChange < -2, -2, 
+                                  if_else(log2FoldChange > 2, 2, log2FoldChange))) %>%
+  
+  ggplot(aes(baseMean, log2FoldChange, color = padj < 0.05, shape = shape)) +
+  geom_hline(yintercept = 0, color = "black") +
+  geom_point(size = 3) +
+  scale_shape_manual(values=c(regular = "\U25CF", 
+                              right = "\U25BA",
+                              bottom = "\U25BC",
+                              top = "\U25B2",
+                              `bottom-right` = "\U25E2",
+                              `top-right` = "\U25E5"), 
+                     guide = NULL) +
+  scale_color_manual(values = c(`TRUE` = "red", `FALSE` = "black"),
+                     name = "Differential expression") +
+  facet_wrap(~ dataset, ncol = 3, 
+             labeller = labeller(dataset = function(labels) as.character(mains[labels]))) +
+  xlab("mean of normalized counts") +
+  ylab("log fold change") +
+  ylim(-2, 2) +
+  ggtheme()
+
+```
+
+## STAR-TE { .tabset .tabset-pills }
+
+The STAR-TE pipeline involves alignment with STAR and custom parameters configured to map multi-mapping reads in a single location the best way possible:
+
+  - `--outFilterMultimapNmax 5000`: max number of multiple alignments allowed for a read: if exceeded, the read is considered unmapped (set to 5,000)
+  - `--outSAMmultNmax 1`: max number of multiple alignments for a read that will be output to the SAM/BAM files. Set to 1. It means that for the (up to) 5,000 possible alignment a read can have, only one will be reported.
+  - `--outFilterMismatchNmax 3`: alignment will be output only if it has no more mismatches than this value (set to 3)
+  - `--outMultimapperOrder Random`: outputs multiple alignments for each read in random order and also also randomizes the choice of the primary alignment from the highest scoring alignments
+  - `--winAnchorMultimapNmax 5000`: max number of loci anchors are allowed to map to (set to 5,000)
+  - `--seedSearchStartLmax 30`: defines the search start point through the read - the read is split into pieces no longer than this value (set to 30, defaults to 50)
+  - `--alignTranscriptsPerReadNmax 30000`: max number of different alignments per read to consider (set to 30,000, defaults to 10,000)
+  - `--alignWindowsPerReadNmax 30000`: max number of windows per read (set to 30,000)
+  - `--alignTranscriptsPerWindowNmax 300`: max number of transcripts per window (set to 300, defaults to 100)
+  - `--seedPerReadNmax 3000`: max number of seeds per read (set to 3,000, defaults to 1,000)
+  - `--seedPerWindowNmax 300`: max number of seeds per window (set to 300, defaults to 50)
+  - `--seedNoneLociPerWindow 1000`: max number of one seed loci per window (set to 1,000, defaults to 10)
+
+In this configuration, reads with equally valid final mapping locations are randomly allocated to only one of them. 
+
+Following the mapping step with STAR, the STAR-TE pipeline involves a quantification step with `featureCounts`. The annotation used for gene quantification is the RepeatMasker annotation. Differential expression was again assessed with `DESeq2`. 
+
+```{r import_repeatmasker}
+repeatmasker <- import("/g/boulard/Francesco/projects/trim66/data/references/mm10_rmsk_TE.gtf.gz", colnames = c("gene_id", "family_id", "class_id"))
+mc <- mcols(repeatmasker) %>% as_tibble %>% distinct
+```
+
+```{r starTE, fig.width=10, fig.height=7}
+starTE <- list.files(file.path(root, "alignments/starTE/"),
+                     pattern = "random.txt$",
+                     recursive = TRUE,
+                     full.names = TRUE)
+starTE <- grep("GSE", starTE, invert = TRUE, value = TRUE)
+datasets_starTE <- basename(dirname(dirname(starTE)))
+
+mains_starTE <- mains[match(datasets_starTE, names(mains))]
+
+get_count_mat_starTE <- function(t, sample_name_pattern) t %>%
+  rename_with(function(x, pat) {
+    bn <- basename(x)
+    bn <- sub(pat, "\\1", bn)
+    return(bn)
+  }, pat = sprintf(".*(%s[0-9]+).*", sample_name_pattern)) %>%
+  dplyr::select(Geneid, starts_with(sample_name_pattern)) %>%
+  inner_join(mc, by = c(Geneid = "gene_id")) %>%
+  group_by(family_id) %>%
+  summarize(across(starts_with(sample_name_pattern), sum)) %>%
+  mutate(across(starts_with(sample_name_pattern), as.integer)) %>%
+  rename(Geneid = family_id) %>%
+  to_matrix(var = "Geneid")
+
+starTE_count_mats <- starTE %>% 
+  map(find_count_mat, get_fn = get_count_mat_starTE) %>%
+  set_names(basename(dirname(dirname(starTE))))
+
+all_sample_sheets_starTE <- datasets_starTE %>%
+  map(function(p) {
+    sp <- sample_sheets[grepl(paste0(p,"$"), names(sample_sheets))]
+    return(get_colData(sp))
+  }) %>%
+  set_names(datasets_starTE)
+
+
+all_dds <- pmap(list(starTE_count_mats, all_sample_sheets_starTE, mains_starTE), do_deseq)
+
+all_volcano <- lapply(all_dds, `[[`, "volcano")
+plot_grid(plotlist = all_volcano)
+```
+
+```{r starTE_MAplots, fig.width=10, fig.height=7}
+map(names(all_dds), function(dataset) all_dds[[dataset]][["res"]] %>% as_tibble) %>%
+  set_names(names(all_dds)) %>%
+  map(dplyr::select, baseMean, log2FoldChange, padj) %>%
+  map2(.y = names(all_dds), ~mutate(.x, dataset = .y)) %>%
+  purrr::reduce(bind_rows) %>%
+  mutate(shape = get_shape(baseMean, log2FoldChange),
+         baseMean = if_else(baseMean > quantile(baseMean, qt_thr), quantile(baseMean, qt_thr), baseMean),
+         log2FoldChange = if_else(log2FoldChange < -2, -2, 
+                                  if_else(log2FoldChange > 2, 2, log2FoldChange))) %>%
+  ggplot(aes(baseMean, log2FoldChange, color = padj < 0.05, shape = shape)) +
+  geom_point(size = 3) +
+  scale_shape_manual(values=c(regular = "\U25CF", 
+                              right = "\U25BA",
+                              bottom = "\U25BC",
+                              top = "\U25B2",
+                              `bottom-right` = "\U25E2",
+                              `top-right` = "\U25E5"), 
+                     guide = NULL) +
+  scale_color_manual(values = c(`TRUE` = "red", `FALSE` = "black"),
+                     name = "Differential expression") +
+  scale_x_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  facet_wrap(~ dataset, ncol = 3, 
+             labeller = labeller(dataset = function(labels) as.character(mains[labels]))) +
+  xlab("mean of normalized counts") +
+  ylab("log fold change") +
+  ylim(-2,2) +
+  ggtheme() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+Similarly to SalmonTE, gene-level quantifications were aggregated at the family and class-level. Here only family-level results will be shown.
+
+```{r extract_de_te}
+all_de_te <- lapply(all_dds, function(O) subset(O$res, padj < 0.05) %>% 
+                      as.data.frame %>%
+                      as_tibble(rownames = "family_id") %>%
+                      inner_join(dplyr::select(mc, family_id, class_id) %>% 
+                                   mutate(class_id = sub("\\?", "", class_id)) %>%
+                                   distinct()
+                      ) %>%
+                      dplyr::select(family_id, class_id, log2FoldChange, padj) %>%
+                      arrange(padj, abs(log2FoldChange)))
+```
+
+### TRIM66-GFP RS total-RNA-seq {.unnumbered}
+
+```{r print_de_te1, warning=TRUE}
+df <- all_de_te[[1]]
+if(nrow(df) > 0) {
+  create_starte_dt(df, "trim66-gfp_de_te_rs_total-rnaseq")
+} else {
+  warning("No DE TE to show")
+}
+```
+
+### TRIM66-GFP RS polyA-RNA-seq {.unnumbered}
+
+```{r print_de_te2, warning=TRUE}
+df <- all_de_te[[2]]
+if(nrow(df) > 0) {
+  create_starte_dt(df, "trim66-gfp_de_te_rs_polya-rnaseq")
+} else {
+  warning("No DE TE to show")
+}
+```
+
+### TRIM66-GFP ES total-RNA-seq - no eGFP2, eGFP3 and eGFP6 {.unnumbered}
+
+```{r print_de_te3, warning=TRUE}
+df <- all_de_te[[3]]
+if(nrow(df) > 0) {
+  create_starte_dt(df, "trim66-gfp_de_te_es_total-rnaseq_noeGFP2_noeGFP3_noeGFP6")
+} else {
+  warning("No DE TE to show")
+}
+```
+
+### TRIM66-GFP ES total-RNA-seq - no eGFP2 {.unnumbered}
+
+```{r print_de_te4, warning=TRUE}
+df <- all_de_te[[4]]
+if(nrow(df) > 0) {
+  create_starte_dt(df, "trim66-gfp_de_te_es_total-rnaseq_noeGFP2")
+} else {
+  warning("No DE TE to show")
+}
+```
+
+### TRIM66-GFP ES totalRNA-seq - all samples {.unnumbered}
+
+```{r print_de_te5, warning=TRUE}
+df <- all_de_te[[5]]
+if(nrow(df) > 0) {
+  create_starte_dt(df, "trim66-gfp_de_te_es_total-rnaseq")
+} else {
+  warning("No DE TE to show")
+}
+```
+ 
+### TRIM66-PHD-null RS total-RNA-seq {.unnumbered}
+
+```{r print_de_te6, warning=TRUE}
+df <- all_de_te[[6]]
+if(nrow(df) > 0) {
+  create_starte_dt(df, "trim66-phd-null_de_te_rs_total-rnaseq")
+} else {
+  warning("No DE TE to show")
+}
+```
+
+## {-}
+
+# Differential expression with `edgeR` { .tabset .tabset-pills }
+
+As mentioned above, from STAR derived gene counts, differential expression was assessed also with `edgeR`. This section reports the lists of DE genes detected with this tool and the comparison with lists generated with `DESeq2` represented as Venn diagrams.
+
+Overall the two tools show a good agreement with about half or more shared DE genes.
+
+```{r edgeR, fig.width=13, fig.height=8}
+all_edgeR <- lapply(names(singleCopyGenes_counts_mats), function(d) {
+
+  sh <- all_sample_sheets_tRNA[[d]]
+  counts <- singleCopyGenes_counts_mats[[d]]
+  counts <- counts[,match(rownames(sh), colnames(counts))]
+  
+  annot <- counts %>%
+    as_tibble(rownames = "gene_id") %>%
+    dplyr::select(gene_id) %>%
+    left_join(mcols(mgi) %>% as_tibble())
+  
+  design <- model.matrix(~ genotype, data = sh)
+  
+  y <- DGEList(counts = counts, samples = sh, genes = annot)
+  # plotMDS(y)
+  
+  keep <- filterByExpr(y, design, min.total.count = ncol(counts))
+  y <- y[keep, , keep.lib.sizes=FALSE]
+  # plotMDS(y)
+  
+  y <- calcNormFactors(y)
+  y <- estimateDisp(y, design, robust=T)
+  # plotBCV(y)
+  
+  fit <- glmFit(y, design)
+  lrt <- glmLRT(fit, coef=2)
+  # lrt <- glmTreat(fit, coef=2, lfc = log2(1.1))
+  tt <- topTags(lrt, p.value = 0.05, n = Inf)
+  # plotMD(lrt)
+  
+  return(list(
+    DGEList=y,
+    fit=fit,
+    lrt=lrt,
+    tt=tt
+  ))
+  
+}) %>% set_names(names(singleCopyGenes_counts_mats))
+
+volcano_plot_edgeR <- function(obj, title, lfc_thr = 0, pvalue_thr = 0.05) {
+  
+  lrt <- obj$lrt
+  
+  all_tt <- topTags(lrt, p.value = 1, n = Inf) %>% 
+    as.data.frame %>%
+    dplyr::select(logFC, FDR) %>%
+    mutate(de = FDR < pvalue_thr,
+           direction = "none",
+           direction = ifelse(de & logFC > lfc_thr, "red", direction),
+           direction = ifelse(de & logFC < -lfc_thr, "blue", direction))
+  
+  p <- all_tt %>%
+    ggplot(aes(logFC, -log10(FDR), color = direction)) +
+    geom_hline(yintercept = -log10(pvalue_thr)) +
+    geom_vline(xintercept = c(-lfc_thr, lfc_thr)) +
+    geom_point(size=0.5) +
+    scale_color_manual(values=c(red="red", blue="blue", gray="gray"), ) +
+    xlab("logFC") + ylab("-log10(p-value)") + 
+    ggtitle(title) +
+    theme_bw()  +
+    ggtheme(legend.position = "none")
+  return(p)
+}
+
+pl <- lapply(seq_along(all_edgeR), function(i) {
+  obj <- all_edgeR[[i]]
+  dataset <- names(all_edgeR)[i]
+  title <- mains[dataset]
+  return(volcano_plot_edgeR(obj, title))
+})
+
+plot_grid(plotlist = pl)
+```
+
+
+```{r edgeR_MAplot, fig.width=10, fig.height=7}
+
+
+find_shape_edgeR <- function(mean, lfc, qt) {
+  shape <- "regular"
+  if (lfc < -2) {
+    # bottom
+    shape <- "bottom"
+  } else if (lfc > 2) {
+    # top
+    shape <- "top"
+  }
+  return(shape)
+}
+
+
+
+all_edgeR %>%
+  map(`[[`, "lrt") %>%
+  map(topTags, p.value = 1, n = Inf) %>%
+  map(as.data.frame) %>%
+  map2(.y=names(all_edgeR), ~mutate(.x, dataset = .y)) %>%
+  purrr::reduce(bind_rows) %>%
+  mutate(shape = get_shape(logCPM, logFC, find_shape_fun = find_shape_edgeR),
+         logFC = if_else(logFC < -2, -2, if_else(logFC > 2, 2, logFC)),
+         color = if_else(gene_id == "MGI:2152406", "Trim66", if_else(FDR < 0.05, "DE", "none"))) %>%
+  ggplot(aes(logCPM, logFC, shape = shape, color = color)) +
+    geom_point(size = 3) +
+    scale_shape_manual(values=c(regular = "\U25CF", 
+                                bottom = "\U25BC",
+                                top = "\U25B2"), 
+                       guide = NULL) +
+    scale_color_manual(values = c(DE = "red", 
+                                  Trim66 = "blue",
+                                  none = rgb(203/255, 203/255, 203/255, 0.5)),
+                       name = "Differential expression") +
+    # scale_x_continuous(labels = function(x) format(x, scientific = TRUE)) +
+    facet_wrap(~ dataset, ncol = 3, 
+               labeller = labeller(dataset = function(labels) as.character(mains[labels]))) +
+    xlab("log count per million") +
+    ylab("log fold change") +
+    ylim(-2,2) +
+    
+    ggtheme() 
+  
+  
+
+```
+
+
+The table below reports the total number of DE genes and partitions them into up and down regulated.
+
+```{r number_of_deg_edger}
+all_edgeR %>%
+  map(`[[`, "tt") %>%
+  map(as.data.frame) %>%
+  map2(.y=names(all_edgeR), ~mutate(.x, dataset = .y)) %>%
+  purrr::reduce(bind_rows) %>%
+  group_by(dataset) %>%
+  summarise(total = n(),
+            upregulated = sum(logFC > 0),
+            downregulated = sum(logFC < 0)) %>%
+  mutate(dataset = mains[dataset] %>% 
+           unlist %>% 
+           gsub(pattern = "\n", 
+                replacement = " ")) %>%
+  rename_with(Hmisc::capitalize)
+```
+
+The barplot below reports the number of DE gene for each gene type category. It shows that, regardless of the dataset, the majority of DE genes is classified as protein coding gene. The second most common gene type is lncRNA. In comparison with the similar DESeq2 barplot, the snoRNA appears. Again the large majority of DEG genes appear to be downregulated. 
+
+```{r edgeR_deg_summary_stats, fig.width=10, fig.height=8}
+all_edgeR %>%
+  map(`[[`, "tt") %>%
+  map(as.data.frame) %>%
+  map2(.y = names(all_edgeR), 
+       ~mutate(.x, 
+               dataset = .y, 
+               direction = ifelse(logFC > 0, "up", "down")
+       )) %>%
+  purrr::reduce(bind_rows)%>%
+  dplyr::select(c(dataset, mgi_type, direction)) %>%
+  ggplot(aes(x = mgi_type, fill = direction)) +
+  geom_bar(position="dodge") +
+  facet_wrap(~ dataset, ncol = 3, labeller = labeller(
+    dataset = tibble(v=as.character(mains), 
+                     k=names(mains)) %>% 
+      pull(v, name = k)
+  )) +
+  coord_flip() +
+  ylab("# of genes") + xlab("Gene type") +
+  scale_fill_manual(name = "Direction", 
+                    labels = c(up = "Upregulated",
+                               down="Downregulated"),
+                    values = c(up = "red", 
+                               down="blue")) +
+  ggtheme() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r all_de_edgeR}
+all_de <- lapply(names(all_edgeR), function(dataset) {
+  de_edger <- all_edgeR[[dataset]]$tt %>% as.data.frame %>% pull(gene_id)
+  de_deseq2 <- all_deg_tables[[dataset]] %>% pull(ID)
+  return(list(edgeR = de_edger, 
+              DESeq2 = de_deseq2))
+}) %>% set_names(names(all_edgeR))
+```
+
+```{r enrichement_analyses_edgeR}
+all_topGO_edgeR <- lapply(names(all_edgeR), function(dataset) {
+  require(clusterProfiler)
+  
+  dgelist <- all_edgeR[[dataset]]$DGElist$genes$gene_id
+  deg <- rownames(as.data.frame(all_edgeR[[dataset]]$tt))
+  
+  gene <-  paste0("MGI:", deg)
+  universe <- paste0("MGI:", dgelist)
+
+  ego <- enrichGO(gene          = gene,
+                  universe      = universe,
+                  OrgDb         = org.Mm.eg.db,
+                  keyType       = "MGI",
+                  ont           = "ALL",
+                  pAdjustMethod = "fdr",
+                  pvalueCutoff  = 0.5,
+                  qvalueCutoff  = 0.1,
+                  minGSSize     = 8,
+                  maxGSSize     = 500,
+                  pool          = TRUE,
+                  readable      = TRUE)
+  
+  df <- as.data.frame(ego)
+  if (nrow(df) == 0) ego <- NULL
+
+  return(ego)
+}) %>% set_names(names(all_dds))
+
+# all_reactome <- lapply(names(all_dds), function(dataset) {
+#   require(clusterProfiler)
+#   
+#   dds <- all_dds[[dataset]]
+#   deg_table <- all_deg_tables[[dataset]]
+#   
+#   gene <- deg_table %>% 
+#     mutate(ID = paste0("MGI:", ID)) %>% 
+#     pull(ID)
+#   
+#   genes <- AnnotationDbi::select(org.Mm.eg.db, 
+#                                  keys    = gene, 
+#                                  columns = "ENTREZID", 
+#                                  keytype = "MGI") %>%
+#     drop_na() %>%
+#     pull(ENTREZID)
+#   
+#   universe <- AnnotationDbi::select(org.Mm.eg.db, 
+#                                     keys    = paste0("MGI:", rownames(dds)), 
+#                                     columns = "ENTREZID", 
+#                                     keytype = "MGI") %>%
+#     drop_na() %>%
+#     pull(ENTREZID)
+#   
+#   x <- enrichPathway(gene          = genes, 
+#                      universe      = universe,
+#                      pvalueCutoff  = 0.05, 
+#                      readable      = TRUE,
+#                      organism      = "mouse",
+#                      pAdjustMethod = "fdr")
+#   
+#   df <- as.data.frame(x)
+#   if (nrow(df) == 0) x <- NULL 
+#   
+#   return(x)
+# }) %>% set_names(names(all_dds))
+```
+
+
+Use the buttons below to explore the results for each dataset.
+
+## TRIM66-GFP RS total-RNA-seq {.unnumbered}
+
+### DEG table {.unnumbered}
+
+```{r pring_edger_deg1, warning=TRUE}
+df1 <- all_edgeR[["TRIM66_Apr2021"]]$tt %>% as.data.frame
+if(nrow(df1) > 0) {
+  create_edger_dt(df1, "trim66-gfp_edger_deg_rs_total-rnaseq")
+} else {
+  warning("No DEG to show")
+}
+```
+
+#### Comparison with DESeq2 results {.unnumbered}
+
+```{r}
+ggVennDiagram(all_de[["TRIM66_Apr2021"]]) +
+  ggtitle(mains["TRIM66_Apr2021"])
+```
+
+### GO terms {.unnumbered}
+
+```{r print_topGO_edgerR1, warning=TRUE}
+topGO_results1 <- all_topGO_edgeR[[1]]
+if(!is.null(topGO_results1)) {
+  create_go_dt(topGO_results1, "trim66-gfp_go_edgeR_rs_total-rnaseq")
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot_edgeR1, fig.height=8, fig.width=9}
+if(!is.null(topGO_results1)) {
+  dotplot(topGO_results1, showCategory = 30)
+}
+```
+
+```{r cnetplot_go_edgeR1, fig.height=10, fig.width=10, eval=FALSE}
+if (!is.null(topGO_results1)) cnetplot(topGO_results1)
+```
+
+
+## TRIM66-GFP RS polyA-RNA-seq {.unnumbered}
+
+### DEG table {.unnumbered}
+
+```{r pring_edger_deg2, warning=TRUE}
+df2 <- all_edgeR[["TRIM66_Dec2020"]]$tt %>% as.data.frame
+
+if(nrow(df2) > 0) {
+  create_edger_dt(df2, "trim66-gfp_edger_deg_rs_polya-rnaseq")
+} else {
+  warning("No DEG to show")
+}
+```
+
+#### Comparison with DESeq2 results {.unnumbered}
+
+```{r}
+ggVennDiagram(all_de[["TRIM66_Dec2020"]]) +
+  ggtitle(mains["TRIM66_Dec2020"])
+```
+
+### GO terms {.unnumbered}
+
+```{r print_topGO_edgerR2, warning=TRUE}
+topGO_results2 <- all_topGO_edgeR[[2]]
+if(!is.null(topGO_results2)) {
+  create_go_dt(topGO_results2, "trim66-gfp_go_edgeR_rs_polya-rnaseq")
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot_edgeR2, fig.height=8, fig.width=9}
+if(!is.null(topGO_results2)) {
+  dotplot(topGO_results2, showCategory = 30)
+}
+```
+
+```{r cnetplot_go_edgeR2, fig.height=10, fig.width=10, eval=FALSE}
+if (!is.null(topGO_results2)) cnetplot(topGO_results2)
+```
+
+
+## TRIM66-GFP ES total-RNA-seq - no eGFP2, eGFP3 and eGFP6 {.unnumbered}
+
+### DEG table {.unnumbered}
+
+```{r pring_edger_deg3, warning=TRUE}
+df3 <- all_edgeR[["TRIM66_elongatedSpermatids_Ago2021_noeGFP2_noeGFP3_noeGFP6"]]$tt %>% as.data.frame
+
+if(nrow(df3) > 0) {
+  create_edger_dt(df3, "trim66-gfp_edger_deg_es_total-rnaseq-noeGFP2-noeGFP3-noeGFP6")
+} else {
+  warning("No DEG to show")
+}
+```
+
+#### Comparison with DESeq2 results {.unnumbered}
+
+```{r}
+ggVennDiagram(all_de[["TRIM66_elongatedSpermatids_Ago2021_noeGFP2_noeGFP3_noeGFP6"]]) +
+  ggtitle(mains["TRIM66_elongatedSpermatids_Ago2021_noeGFP2_noeGFP3_noeGFP6"])
+```
+
+### GO terms {.unnumbered}
+
+```{r print_topGO_edgerR3, warning=TRUE}
+topGO_results3 <- all_topGO_edgeR[[3]]
+if(!is.null(topGO_results3)) {
+  create_go_dt(topGO_results3, "trim66-gfp_go_edgeR_es_total-rnaseq_noegfp2_noegfp3_noegfp6")
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot_edgeR3, fig.height=8, fig.width=9}
+if(!is.null(topGO_results3)) {
+  dotplot(topGO_results3, showCategory = 30)
+}
+```
+
+```{r cnetplot_go_edgeR3, fig.height=10, fig.width=10, eval=FALSE}
+if (!is.null(topGO_results3)) cnetplot(topGO_results3)
+```
+
+
+## TRIM66-GFP ES total-RNA-seq - no eGFP2 {.unnumbered}
+
+### DEG table {.unnumbered}
+
+```{r pring_edger_deg4, warning=TRUE}
+df4 <- all_edgeR[["TRIM66_elongatedSpermatids_Ago2021_noeGFP2"]]$tt %>% as.data.frame
+
+if(nrow(df4) > 0) {
+  create_edger_dt(df4, "trim66-gfp_edger_deg_es_total-rnaseq-noeGFP2")
+} else {
+  warning("No DEG to show")
+}
+```
+
+#### Comparison with DESeq2 results {.unnumbered}
+
+```{r}
+ggVennDiagram(all_de[["TRIM66_elongatedSpermatids_Ago2021_noeGFP2"]]) +
+  ggtitle(mains["TRIM66_elongatedSpermatids_Ago2021_noeGFP2"])
+```
+
+
+### GO terms {.unnumbered}
+
+```{r print_topGO_edgerR4, warning=TRUE}
+topGO_results4 <- all_topGO_edgeR[[4]]
+if(!is.null(topGO_results4)) {
+  create_go_dt(topGO_results4, "trim66-gfp_go_edgeR_es_total-rnaseq_noegfp2")
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot_edgeR4, fig.height=8, fig.width=9}
+if(!is.null(topGO_results4)) {
+  dotplot(topGO_results4, showCategory = 30)
+}
+```
+
+```{r cnetplot_go_edgeR4, fig.height=10, fig.width=10, eval=FALSE}
+if (!is.null(topGO_results4)) cnetplot(topGO_results4)
+```
+
+## TRIM66-GFP ES totalRNA-seq - all samples {.unnumbered}
+ 
+### DEG table {.unnumbered}
+
+```{r pring_edger_deg5, warning=TRUE}
+df5 <- all_edgeR[["TRIM66_elongatedSpermatids_Ago2021"]]$tt %>% as.data.frame
+if(nrow(df5) > 0) {
+  create_edger_dt(df5, "trim66-gfp_edger_deg_es_total-rnaseq")
+} else {
+  warning("No DEG to show")
+}
+```
+
+#### Comparison with DESeq2 results {.unnumbered}
+
+```{r}
+ggVennDiagram(all_de[["TRIM66_elongatedSpermatids_Ago2021"]]) +
+  ggtitle(mains["TRIM66_elongatedSpermatids_Ago2021"])
+```
+
+
+### GO terms {.unnumbered}
+
+```{r print_topGO_edgerR5, warning=TRUE}
+topGO_results5 <- all_topGO_edgeR[[5]]
+if(!is.null(topGO_results5)) {
+  create_go_dt(topGO_results5, "trim66-gfp_go_edgeR_es_total-rnaseq")
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot_edgeR5, fig.height=8, fig.width=9}
+if(!is.null(topGO_results5)) {
+  dotplot(topGO_results5, showCategory = 30)
+}
+```
+
+```{r cnetplot_go_edgeR5, fig.height=10, fig.width=10, eval=FALSE}
+if (!is.null(topGO_results5)) cnetplot(topGO_results5)
+```
+
+## TRIM66-PHD-null RS total-RNA-seq {.unnumbered}
+
+### DEG table {.unnumbered}
+
+```{r pring_edger_deg6, warning=TRUE}
+df6 <- all_edgeR[["TRIM66_Oct2020"]]$tt %>% as.data.frame
+if(nrow(df6) > 0) {
+  create_edger_dt(df6, "trim66-phd-null_deg_rs_total-rnaseq")
+} else {
+  warning("No DEG to show")
+}
+```
+
+#### Comparison with DESeq2 results {.unnumbered}
+
+```{r}
+ggVennDiagram(all_de[["TRIM66_Oct2020"]]) +
+  ggtitle(mains["TRIM66_Oct2020"])
+```
+
+
+### GO terms {.unnumbered}
+
+```{r print_topGO_edgerR6, warning=TRUE}
+topGO_results6 <- all_topGO_edgeR[[6]]
+if(!is.null(topGO_results6)) {
+  create_go_dt(topGO_results6, "trim66-phd-null_go_edgeR_rs_total")
+} else {
+  warning("No GO terms to show")
+}
+```
+
+```{r go_dotplot_edgeR6, fig.height=8, fig.width=9}
+if(!is.null(topGO_results6)) {
+  dotplot(topGO_results6, showCategory = 30)
+}
+```
+
+```{r cnetplot_go_edgeR6, fig.height=10, fig.width=10, eval=FALSE}
+if (!is.null(topGO_results6)) cnetplot(topGO_results6)
+```
+

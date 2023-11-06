@@ -1,0 +1,21 @@
+cores: 8
+local-cores: 8
+reason: True
+printshellcmds: True
+use-singularity: false
+singularity-args: "--no-home --bind /g/boulard/,/scratch/tabaro"
+use-envmodules: True
+use-conda: True
+rerun-incomplete: True
+jobs: 20
+latency-wait: 300
+slurm: True
+retries: 2
+rerun-triggers:
+    - mtime
+    - code
+
+default-resources:
+    - slurm_account=boulard
+    - slurm_partition="htc-el8"
+    - slurm_extra="--overcommit"

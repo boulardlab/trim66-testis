@@ -1,0 +1,53 @@
+variables:
+  DOCKER_TLS_CERTDIR: ""
+  GIT_STRATEGY: clone
+  REGISTRY_USER: tabaro
+  DOCKER_IMAGE: $REGISTRY_USER/snakemake-chip-seq/environment:$CI_COMMIT_SHORT_SHA
+  DOCKER_DRIVER: overlay
+
+stages:
+  - build
+
+.build-docker:
+  stage: build
+  image: 
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  script:
+    - echo "${CI_REGISTRY}/${DOCKER_IMAGE}"
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"${CI_REGISTRY}\":{\"auth\":\"$(printf "%s:%s" "gitlab-ci-token" "${CI_JOB_TOKEN}" | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
+    - >-
+      /kaniko/executor
+      --context "${CI_PROJECT_DIR}/snakemake/"
+      --dockerfile "${CI_PROJECT_DIR}/snakemake/Dockerfile"
+      --destination "${CI_REGISTRY}/${DOCKER_IMAGE}"
+
+build:
+  extends: .build-docker
+  only:
+    changes:
+      - snakemake/Dockerfile
+
+.update-snakefile:
+  stage: build
+  image: 
+    name: alpine/git:v2.36.2
+    entrypoint: [""]
+  before_script:
+    - git config --global user.name $GITLAB_USER_NAME
+    - git config --global user.email $GITLAB_USER_EMAIL
+  script:
+    - >- 
+      sed -i -r 's/^(containerized: "docker:\/\/registry\.git\.embl\.de\/tabaro\/snakemake-chip-seq\/.+:).{8}"$/\1'$CI_COMMIT_SHORT_SHA'"/' $SNAKEFILE &&
+      git add $SNAKEFILE &&
+      git commit -m "Auto-update Snakefile" &&
+      git push -v "https://gitlab-ci-token:${SELFUPDATE_TOKEN}@git.embl.de/tabaro/snakemake-chip-seq.git" HEAD:$CI_COMMIT_REF_NAME
+
+update-snakemake:
+  extends: .update-snakefile
+  variables:
+    SNAKEFILE: snakemake/Snakefile
+  only:
+    changes:
+      - snakemake/Dockerfile

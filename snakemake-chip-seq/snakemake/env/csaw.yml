@@ -1,0 +1,6 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - bioconductor-csaw=1.32.0
+  - bioconductor-summarizedexperiment=1.28.0
