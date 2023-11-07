@@ -24,7 +24,9 @@ In addition, users can run the scripts in `figures` directory to reproduce the p
 - `figures/plot_sashimi.R` produces figure 2;
 - `figures/single_copy_genes_v2.R`: produces figure S6, among other figures;
 - `figures/te_v1.R` produces figure 4a;
-- `figures/scrna-seq-testis` contains script to download and prepare the data for a basic Seurat analysis to generate figure 1B and S1b. 
+- `figures/scrna-seq-testis` contains script to download and prepare the data for a basic Seurat analysis to generate figure 1B and S1b;
+- Figures 4d and 4e are generated from the Snakemake pipeline in `snakemake-chip-seq`;
+- `figures/dotplot-npeaks.R` generates figure 4f.
 
 # Reporting issues
 If users encouter problems, please use the Issue tracker to open issues, we will get back to you.
