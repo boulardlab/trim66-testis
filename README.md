@@ -22,7 +22,7 @@ In addition, users can run the scripts in `figures` directory to reproduce the p
 
 - `figures/heatmap_markers.R` produces figure S5;
 - `figures/plot_sashimi.R` produces figure 2;
-- `figures/plot_sashimi_Trim66-PHD.R` produces figure XX;
+- `figures/plot_sashimi_Trim66-PHD.R` produces figure XX. Bam files were generated with the [3t-seq pipeline](https://github.com/boulardlab/3t-seq);
 - `figures/single_copy_genes_v2.R`: produces figure S6, among other figures;
 - `figures/te_v1.R` produces figure 4a;
 - `figures/scrna-seq-testis` contains script to download and prepare the data for a basic Seurat analysis to generate figure 1B and S1b;
