@@ -32,3 +32,20 @@ In addition, users can run the scripts in the `figures` directory to reproduce o
 
 # Reporting issues
 If users encouter problems, please use the Issue tracker to open issues, we will get back to you.
+
+# Citing us
+
+```bibtex
+@article {Mielnicka2024.02.12.579976,
+	author = {Monika Mielnicka and Francesco Tabaro and Rahul Sureka and Basilia Acurzio and Renata Paoletti and Ferdinando Scavizzi and Marcello Raspa and Alvaro H. Crevenna and Karine Lapouge and Kim Remans and Matthieu Boulard},
+	title = {Trim66{\textquoteright}s paternal deficiency causes intrauterine overgrowth},
+	elocation-id = {2024.02.12.579976},
+	year = {2024},
+	doi = {10.1101/2024.02.12.579976},
+	publisher = {Cold Spring Harbor Laboratory},
+	abstract = {The tripartite motif-containing protein 66 (TRIM66, also known as TIF1-delta) is a PHD-Bromo containing protein primarily expressed in post-meiotic male germ cells known as spermatids. Biophysical assays showed that TRIM66 PHD-Bromo domain binds to H3 N-terminus only when lysine 4 is unmethylated. We addressed TRIM66{\textquoteright}s role in reproduction by loss-of-function genetics in the mouse. Males homozygous for Trim66-null mutations produced functional spermatozoa. Round spermatids lacking TRIM66 upregulated a network of genes involved in histone acetylation and H3K4 methylation. Profiling of H3K4me3 patterns in the sperm produced by Trim66-null mutant showed minor alterations below statistical significance. Unexpectedly, Trim66-null males, but not females, sired pups overweight at birth, hence revealing that Trim66 mutations cause a paternal effect phenotype.Competing Interest StatementThe authors have declared no competing interest.},
+	URL = {https://www.biorxiv.org/content/early/2024/02/14/2024.02.12.579976},
+	eprint = {https://www.biorxiv.org/content/early/2024/02/14/2024.02.12.579976.full.pdf},
+	journal = {bioRxiv}
+}
+```
