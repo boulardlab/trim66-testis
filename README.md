@@ -1,5 +1,5 @@
 # Trim66’s paternal deficiency causes intrauterine overgrowth
-This repository holds the analysis code for the paper "Trim66’s paternal deficiency causes intrauterine overgrowth".
+This repository holds the analysis code for the paper [**Trim66’s paternal deficiency causes intrauterine overgrowth**](https://www.biorxiv.org/content/10.1101/2024.02.12.579976v1).
 
 The content is organized as follows:
 
