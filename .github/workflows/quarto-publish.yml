@@ -39,6 +39,9 @@ jobs:
       # - name: Setup Python
       #   uses: actions/setup-python@v3
 
+      - name: Install curl.h
+        run: sudo apt-get update && sudo apt-get install --yes libcurl4-openssl-dev
+        
     #   From https://github.com/r-lib/actions/tree/v2-branch/setup-r
       - name: Setup R
         uses: r-lib/actions/setup-r@v2
