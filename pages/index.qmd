@@ -1,0 +1,16 @@
+---
+title: "Trim66’s paternal deficiency causes intrauterine overgrowth"
+---
+
+This website shows results from breeding and RNA-seq experiments as reported in[Trim66’s paternal deficiency causes intrauterine overgrowth](https://www.biorxiv.org/content/10.1101/2024.02.12.579976v1).
+
+Notebooks:
+
+- [Breeding results](LSA-vignette.Rmd)
+- [RNA-seq results](test.qmd)
+
+Data download:
+
+- [Breeding data](Mielnicka%20et%20al.%202024%20source%20data.xlsx)
+- [Raw RNA-seq data (ENA)](https://www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-12471?key=74ddb13a-6ab7-4d1f-8621-ce7ad93b9f12)
+- [Raw ChIP-seq data (ENA)](https://www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-13088?key=d6600bbc-8e32-49bf-bde0-a3569806de08)

@@ -4,7 +4,7 @@ This repository holds the analysis code for the paper [**Trim66’s paternal def
 The content is organized as follows:
 
 - `figures/` holds scripts to reproduce most of the figures in the paper.
-- `notebooks/` directory holds both the rmarkdown and compiled version of a notebook comparing the RNA-seq datasets.
+- `pages/` directory holds files for the [GitHub Pages website](https://boulardlab.github.io/trim66-testis/).
 - `snakemake-chip-seq/` holds a Snakemake pipeline used to process the ChIP-seq data presented in the paper.
 - `snakemake-rna-seq/` holds a Snakemake pipeline used to process the RNA-seq data presetend in the paper.
 

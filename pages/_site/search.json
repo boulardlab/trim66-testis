@@ -1,0 +1,23 @@
+[
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "Trim66’s paternal deficiency causes intrauterine overgrowth",
+    "section": "",
+    "text": "This website shows results from breeding and RNA-seq experiments as reported inTrim66’s paternal deficiency causes intrauterine overgrowth.\nNotebooks:\n\nBreeding results\nRNA-seq results\n\nData download:\n\nBreeding data\nRaw RNA-seq data (ENA)\nRaw ChIP-seq data (ENA)"
+  },
+  {
+    "objectID": "about.html",
+    "href": "about.html",
+    "title": "About",
+    "section": "",
+    "text": "About this site"
+  },
+  {
+    "objectID": "test.html",
+    "href": "test.html",
+    "title": "",
+    "section": "",
+    "text": "&lt;iframe src=\"./compare_TRIM66_spermatid_libs.html\"&gt;&lt;/iframe&gt;"
+  }
+]
