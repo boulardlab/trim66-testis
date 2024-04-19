@@ -1,0 +1,13 @@
+{
+    "filters": [
+        {
+            "id": "mismatch",
+            "tag": "NM:<=4"
+        },
+        {
+            "id": "highMapQuality",
+            "mapQuality": ">=20"
+        }
+    ],
+    "rule": " mismatch & highMapQuality"
+}

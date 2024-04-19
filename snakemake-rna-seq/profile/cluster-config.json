@@ -1,0 +1,156 @@
+{
+  "__default__": {
+        "job-name"   : "{rule}",
+        "error"     : "{rule}-%j.log",
+        "output"    : "{rule}-%j.log",
+        "ntasks"    : 1,
+        "cpus-per-task"      : 1,
+        "mem"       : "4G",
+        "time"      : "00-00:20:00",
+        "partition" : "htc"
+    },
+  "download_sra" : {
+    "time": "7-00:00:00",
+    "cpus-per-task": 8,
+    "mem": "16G"
+  },
+  "fastqc" : {
+    "cpus-per-task": 2,
+    "mem": "4G"
+  },
+  "fastqc_trim" : {
+    "cpus-per-task": 2,
+    "mem": "4G",
+    "time": "1:00:00"
+  },
+  "trim_pe" : {
+    "time": "06:00:00",
+    "cpus-per-task": 4,
+    "mem": "16G"
+  },
+  "trim_se" : {
+    "time": "06:00:00",
+    "cpus-per-task": 4,
+    "mem": "16G"
+  },
+  "trimmomatic_pe": {
+      "cpus-per-task": 2,
+      "mem": "4G",
+      "time": "01:30:00"
+  },
+  "trimmomatic_se": {
+      "cpus-per-task": 2,
+      "mem": "4G",
+      "time": "01:30:00"
+  },
+  "download_genome_fasta_file": {
+    "time": "01:00:00",
+    "cpus-per-task": 4,
+    "mem": "4G"
+  },
+  "download_genome_annotation_file": {
+    "time": "01:00:00",
+    "cpus-per-task": 4,
+    "mem": "4G"
+  },
+  "star_genome_preparation": {
+    "time": "02:00:00",
+    "cpus-per-task": 16,
+    "mem": "32G"
+  },
+  "star": {
+    "time": "06:00:00",
+    "cpus-per-task": 8,
+    "mem": "32G"
+  },
+  "deseq2": {
+    "time": "01:00:00",
+    "cpus-per-task": 4,
+    "mem": "20G"
+  },
+  "salmonTE_quant": {
+    "time": "06:00:00",
+    "cpus-per-task": 8,
+    "mem": "16G"
+  },
+  "salmonTE_test": {
+    "time": "06:00:00",
+    "cpus-per-task": 4,
+    "mem": "16G"
+  },
+  "edit_condition_file": {
+    "time": "10:00",
+    "cpus-per-task": 1,
+    "mem": "2G"
+  },
+  "starTE_random": {
+    "time": "12:00:00",
+    "cpus-per-task": 8,
+    "mem": "32G"
+  },
+  "starTE_multihit": {
+    "time": "12:00:00",
+    "cpus-per-task": 8,
+    "mem": "32G"
+  },
+  "download_repeatmasker_annotation_file": {
+    "time": "20:00",
+    "cpus-per-task": 4,
+    "mem": "4G"
+  },
+  "featureCounts_random": {
+    "time": "06:00:00",
+    "cpus-per-task": 4,
+    "mem": "16G"
+  },
+  "featureCounts_multihit": {
+    "time": "06:00:00",
+    "cpus-per-task": 4,
+    "mem": "16G"
+  },
+  "deseq2_report": {
+    "time": "30:00",
+    "cpus-per-task": 4,
+    "mem": "16G"
+  },
+  "subset_gtf": {
+    "time": "1:00:00",
+    "cpus-per-task": 1,
+    "mem": "20G"
+  },
+  "filter_bam" : {
+    "time": "30:00",
+    "cpus-per-task": 3,
+    "mem": "16G"
+  },
+  "gtf2bed" : {
+    "time": "1:00:00",
+    "cpus-per-task": 1,
+    "mem": "4G"
+  },
+  "picard_markdup" : {
+    "time": "6:00:00",
+    "cpus-per-task": 2,
+    "mem": "16G"
+  },
+  "index_bam" : {
+    "time": "30:00",
+    "cpus-per-task": 1,
+    "mem": "8G"
+  },
+  "coverage" : {
+    "time": "2:00:00",
+    "cpus-per-task": 2,
+    "mem": "16G"
+  },
+  "coverage_trna" : {
+    "time": "2:00:00",
+    "cpus-per-task": 1,
+    "mem": "16G"
+  },
+  "build_trna_coverage_matrix" : {
+    "time": "20:00",
+    "cpus-per-task": 1,
+    "mem": "32G"
+  }
+}

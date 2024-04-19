@@ -1,0 +1,74 @@
+results_dir: ../testdata/results
+references_dir: ../testdata/references
+
+external_datasets:
+  - name: kimmins-pmid33596408
+    bigwig: /scratch/tabaro/trim66-chipseq-sperm-vs-kimmins-peaks/geo
+    tile-size: 2000
+
+genome:
+  label: mm10
+  chromosome_prefix: "chr"
+  autosomes: 19
+  sex_chromosomes:
+    - "X"
+    - "Y"
+  fasta_link: ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M25/GRCm38.primary_assembly.genome.fa.gz
+  gtf_link: ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M25/gencode.vM25.annotation.gtf.gz
+
+## RULE-SPECIFIC PARAMETERS
+fastqc: # FastQC
+  params: "-noextract"
+
+trimmomatic: # Trimmomatic
+  trimmer:
+    se: "ILLUMINACLIP:TruSeq3-SE.fa:2:0:10 LEADING:28 MINLEN:40"
+    pe: "ILLUMINACLIP:TruSeq3-PE.fa:2:0:10 LEADING:28 TRAILING:20 MINLEN:130"
+  params:
+    se: "-phred33"
+    pe: "-phred33"
+
+picard-markduplicates:
+  params: "--REMOVE_DUPLICATES true"
+
+bowtie2: # bowtie2
+  params: "--end-to-end -q --sensitive -t"
+
+multiBamSummary: # multiBamSummary
+  params: "--binSize 25"
+
+plotCorrelation: # plotCorrelation
+  params: "--corMethod pearson --skipZeros"
+
+rmdup: # MarkDuplicates
+  params: "-AS --REMOVE_DUPLICATES true --SORTING_COLLECTION_SIZE_RATIO 0.10"
+
+plotFingerprint: # plotFingerprint
+  params: "--smartLabels --skipZeros --numberOfSamples 10000"
+
+bamCoverage: # alignments_bigwig,
+  normalizations: # one of: RPKM, CPM, BPM, RPGC, None, raw
+    - raw
+    - rpgc
+    - rpkm
+  minMappingQuality: 20
+  params: "--binSize 1"
+
+bamCompare:
+  params: "--operation log2 --binSize 50"
+
+macs2-callpeak: # defaults are --treatment ... --control ... --name ... --outdir ... --gsize ... --format A
+  params: "--qvalue 0.01 --mfold 10 50 --fix-bimodal --keep-dup all" # duplicated reads are handled by Picard
+  modes:
+    model: true
+    nomodel_nobroad: true # sets --nomodel --extsize ...
+    nomodel_broad: false # sets --nomodel --broad --broad-cutoff 0.05
+
+computeMatrix:
+  params: "-b 3000 -a 3000"
+
+plotHeatmap:
+  params: "--skipZeros"
+
+multiqc:
+  params: ""

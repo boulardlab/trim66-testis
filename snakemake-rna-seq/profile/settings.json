@@ -1,0 +1,7 @@
+{
+    "SBATCH_DEFAULTS": "account=boulard",
+    "CLUSTER_NAME": "",
+    "CLUSTER_CONFIG": "cluster-config.json",
+    "ADVANCED_ARGUMENT_CONVERSION": "no",
+    "LOG_FOLDER": "../../var/log/slurm/"
+}

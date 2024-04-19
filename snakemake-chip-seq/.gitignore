@@ -1,0 +1,8 @@
+testdata/
+tests/
+test/
+**/.snakemake
+**/.cache
+**/.java
+**/.config
+logs/

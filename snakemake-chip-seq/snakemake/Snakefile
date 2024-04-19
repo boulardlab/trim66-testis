@@ -1,0 +1,628 @@
+import os
+import sys
+
+from pathlib import Path
+from datetime import timedelta
+import json
+import pandas as pd
+from pprint import pprint as pp
+import functools
+import itertools
+import re
+
+from urllib.parse import urlparse
+
+###########################
+## Pin Snakemake version ##
+###########################
+
+from snakemake.utils import min_version as snakemake_min_version
+
+snakemake_min_version("7.19.1")
+
+############
+## Config ##
+############
+
+
+configfile: "config.yaml"
+
+
+################
+## Containers ##
+################
+
+
+container: "condaforge/mambaforge:latest"
+
+
+containerized: "docker://registry.git.embl.de/tabaro/snakemake-chip-seq/environment:67e616b7"
+
+
+###################################
+## Portable Encapsulated project ##
+###################################
+
+
+pepfile: "pep/config.yml"
+
+
+pepschema: "http://schema.databio.org/pep/2.1.0.yaml"
+
+
+###########################
+## VALIDATE GENOME LABEL ##
+###########################
+
+
+# https://deeptools.readthedocs.io/en/latest/content/feature/effectiveGenomeSize.html
+
+effective_genome_size = {
+    "mm10": {
+        "50": 2308125349,
+        "75": 2407883318,
+        "100": 2467481108,
+        "150": 2494787188,
+        "200": 2520869189,
+        "generic": 2652783500,
+    },
+    "mm9": {
+        "50": 2304947926,
+        "75": 2404646224,
+        "100": 2462481010,
+        "150": 2489384235,
+        "200": 2513019276,
+        "generic": 2620345972,
+    },
+    "hg19": {
+        "50": 2685511504,
+        "75": 2736124973,
+        "100": 2776919808,
+        "150": 2827437033,
+        "200": 2855464000,
+        "generic": 2864785220,
+    },
+    "hg38": {
+        "50": 2701495761,
+        "75": 2747877777,
+        "100": 2805636331,
+        "150": 2862010578,
+        "200": 2887553303,
+        "generic": 2913022398,
+    },
+}
+
+
+if not config["genome"]["label"] in effective_genome_size.keys():
+    raise KeyError(
+        f"Genome label unknown: {config['genome']['label']}.\n"
+        + "Supported genome labels are: "
+        + " ".join(effective_genome_size.keys())
+    )
+
+
+###########################
+## ENCODE BLACKLIST URLs ##
+###########################
+
+encode_blacklists = {
+    "mm10": "https://www.encodeproject.org/files/ENCFF547MET/@@download/ENCFF547MET.bed.gz",
+    "hg19": "https://www.encodeproject.org/files/ENCFF001TDO/@@download/ENCFF001TDO.bed.gz",
+    "hg38": "https://www.encodeproject.org/files/ENCFF356LFX/@@download/ENCFF356LFX.bed.gz",
+}
+
+#############
+## HELPERS ##
+#############
+
+
+def validate_protocol():
+    if not pep.sample_table["sequencing_protocol"].isin(["single-end", "paired-end"]).all():
+        raise ValueError('Protocol must be one of "single-end" or "paired-end"')
+
+
+def get_filename(link, decompress=False, stem=False):
+    # sometimes we use this function to get filenames of paths instead of links.
+    # convert back Path to str.
+    if isinstance(link, Path):
+        link = str(link)
+    # parse
+    p = urlparse(link)
+
+    # cast to Path and get name attribute
+    if stem:
+        basename = Path(p.path).stem
+    else:
+        basename = Path(p.path).name
+
+    # remove .gz
+    if decompress and str(basename).endswith(".gz"):
+        basename = basename.replace(".gz", "")
+
+    return basename
+
+
+def get_genome_filter_fasta_path(genome_fasta_path):
+    return Path(re.sub(r"^(.*)\.(fa|fasta)(\.gz)?$", r"\1.filter.\2", genome_fasta_path))
+
+
+def get_genome_filter_index_path(genome_fasta_path):
+    genome_fasta_path = get_genome_filter_fasta_path(genome_fasta_path)
+    genome_fasta_path = str(genome_fasta_path)
+    genome_index_path = genome_fasta_path + ".fai"
+    return Path(genome_index_path)
+
+
+def get_filtered_bams(wildcards):
+    s = pep.sample_table["filename"].tolist()
+    s = [fn.replace(".fastq.gz", "") for fn in s]
+    return {
+        "bam": expand(
+            config["alignments_dir"].joinpath("filtered", "sorted", "{sample}.bam"),
+            sample=s,
+        ),
+        "bam_idx": expand(
+            config["alignments_dir"].joinpath("filtered", "sorted", "{sample}.bam.bai"),
+            sample=s,
+        ),
+    }
+
+
+def get_bw(wildcards):
+    s = get_samples(wildcards)
+    return expand(
+        config["bigwig_dir"].joinpath("{normalization_method}", "{sample}.bw"),
+        sample=s,
+        normalization_method=normalization_methods,
+    )
+
+
+def get_bw_by_norm(wildcards):
+    s = get_samples(wildcards)
+    return expand(
+        config["bigwig_dir"].joinpath(wildcards.normalization_method, "{sample}.bw"),
+        sample=s,
+    )
+
+
+def get_samples(wildcards, as_list=True):
+    if as_list:
+        ret = [fn.replace(".fastq.gz", "") for fn in pep.sample_table["filename"]]
+    else:
+        ret = pep.sample_table["filename"].replace(r"^(.+)\.fastq\.gz", r"\1", regex=True)
+    return ret
+
+
+def get_alignments(wildcards):
+    s = get_samples(wildcards)
+    return expand(config["log_dir"].joinpath("bowtie2/{sample}.log"), sample=s)
+
+
+def get_rmdup(wildcards):
+    s = get_samples(wildcards)
+    return expand(
+        config["alignments_dir"].joinpath("rmdup", "{sample}.metrics.txt"), sample=s
+    )
+
+
+def get_idxstat(wildcards):
+    s = get_samples(wildcards)
+    return expand(
+        config["alignments_dir"].joinpath("filtered", "sorted", "{sample}.idxstats.txt"),
+        sample=s,
+    )
+
+
+def get_fingerprints(wildcards):
+    return config["pictures_dir"].joinpath("fingerprint/qc_metrics.txt")
+
+
+def get_peaks(wildcards):
+    s = get_samples(wildcards)
+    return expand(
+        config["peaks_dir"].joinpath("{macs2_mode}", "{sample}", "{sample}_peaks.xls"),
+        macs2_mode=macs2_modes,
+        sample=s,
+    )
+
+
+def get_peaks_bed(wildcards):
+    s = get_samples(wildcards)
+    return expand(
+        config["peaks_dir"].joinpath(
+            wildcards.macs2_mode, "{sample}", "{sample}_peaks.bed"
+        ),
+        sample=s,
+    )
+
+
+def get_sloped_peaks_bed(wildcards):
+    s = get_samples(wildcards)
+    return expand(
+        config["peaks_dir"].joinpath(
+            "{{macs2_mode}}", "{sample}", "slopped", "{sample}_peaks.bed"
+        ),
+        sample=s,
+    )
+
+
+def get_corMatrices(wildcards):
+    return config["pictures_dir"].joinpath("multiBamSummary", "heatmap.txt")
+
+
+def get_PCA(wildcards):
+    return config["pictures_dir"].joinpath("multiBamSummary", "pca.txt")
+
+
+def get_reads_dir() -> Path:
+    file_paths = pep.sample_table["file_path"].tolist()
+    first = file_paths[0]
+    p = Path(first)
+    return p.parent
+
+
+def build_chromosome_names():
+    chromosomes = [str(i + 1) for i in range(int(config["genome"]["autosomes"]))]
+
+    if len(config["genome"]["sex_chromosomes"]) > 0:
+        chromosomes += config["genome"]["sex_chromosomes"]
+
+    chromosome_prefix = config["genome"]["chromosome_prefix"]
+    if chromosome_prefix != "":
+        chromosomes = [chromosome_prefix + chrom for chrom in chromosomes]
+
+    return " ".join(chromosomes)
+
+
+def get_macs2_modes() -> list:
+    macs2_modes = []
+
+    if not any(
+        [
+            config["macs2-callpeak"]["modes"]["model"],
+            config["macs2-callpeak"]["modes"]["nomodel_nobroad"],
+            config["macs2-callpeak"]["modes"]["nomodel_broad"],
+        ]
+    ):
+        print("Setting default MACS2 running mode to: model.")
+        return ["model"]
+
+    for mode in ["model", "nomodel_nobroad", "nomodel_broad"]:
+        if config["macs2-callpeak"]["modes"][mode]:
+            macs2_modes.append(mode)
+
+    return macs2_modes
+
+
+def get_macs2_modes_for_peaks_heatmap(macs2_modes):
+    ret = macs2_modes
+    if "nomodel_broad" in macs2_modes:
+        ret = ret.remove("nomodel_broad")
+    return ret
+
+
+def get_effective_genome_size(wildcards):
+    samples = get_samples(wildcards, as_list=False)
+    df = pep.sample_table[samples == wildcards.sample]
+    read_length = df["read_length"].iloc[0]
+    genome_label = config["genome"]["label"]
+    return effective_genome_size[genome_label][read_length]
+
+
+def get_protocol(wildcards, sample):
+    samples = get_samples(wildcards, as_list=False)
+    df = pep.sample_table[samples == sample]
+    protocol = df["sequencing_protocol"].iloc[0]
+    return protocol
+
+
+def get_npeaks_files(wildcards):
+    samples = get_samples(wildcards, as_list=True)
+    return expand(
+        config["peaks_dir"].joinpath(wildcards.macs2_mode, "{sample}", "npeaks.txt"),
+        sample=samples,
+    )
+
+
+def get_normalization_methods():
+    normalization_methods = config["bamCoverage"]["normalizations"]
+    allowed = ["none", "raw", "rpgc", "rpkm", "cpm", "bpm"]
+    if not all([x.lower() in allowed for x in normalization_methods]):
+        raise ValueError("Unsupported normalization method!")
+    return normalization_methods
+
+
+# def get_macs2_model_plots(wildcards):
+#     samples = get_samples(wildcards)
+#     return expand(
+#         config["peaks_dir"].joinpath("{macs2_mode}", "{sample}", "{sample}_model.pdf"),
+#         macs2_mode=macs2_modes,
+#         sample=samples,
+#     )
+
+
+def get_external_datasets():
+    if "external_datasets" in config:
+        ret = [x["name"] for x in config["external_datasets"]]
+    else:
+        ret = []
+    return ret
+
+
+def get_external_datasets_igv_screenshots(wildcards):
+    if "external_datasets" in config:
+        ret = expand(
+            config["pictures_dir"].joinpath(
+                "peaks",
+                "{external_dataset}",
+                "{macs2_mode}",
+                "{bigwig_normalization_method}",
+                "igv.done",
+            ),
+            external_dataset=get_external_datasets(),
+            bigwig_normalization_method=normalization_methods,
+            macs2_mode=macs2_modes,
+        )
+    else:
+        ret = []
+    return ret
+
+
+def get_external_datasets_comparisons(wildcards):
+    ret = []
+    if "external_datasets" in config:
+        for dataset in config["external_datasets"]:
+            dataset_name = dataset["name"]
+
+            folder = dataset["bigwig"]
+
+            if folder.endswith("/"):
+                folder = folder[:-1]
+
+            samples = []
+            for ext in [".bw", ".bigwig"]:
+                for filename in glob.glob(f"{folder}/*{ext}"):
+                    filename = os.path.basename(filename)
+                    if filename.endswith(ext):
+                        samples.append(filename.replace(ext, ""))
+
+            for normalization_method in normalization_methods:
+                for internal_sample in get_samples(wildcards):
+                    ret += expand(
+                        config["results_dir"].joinpath(
+                            "external-comparisons",
+                            dataset_name,
+                            "correlation-analysis",
+                            normalization_method,
+                            internal_sample,
+                            "{external_sample}.pdf",
+                        ),
+                        external_sample=samples,
+                    )
+    return ret
+
+
+def get_external_datasets_correlation_heatmaps(wildcards):
+    ret = []
+    for external_dataset in get_external_datasets():
+        for normalization_method in normalization_methods:
+            ret.append(
+                config["results_dir"].joinpath(
+                    "external-comparisons",
+                    external_dataset,
+                    "correlation-analysis",
+                    normalization_method,
+                    "heatmap.pdf",
+                )
+            )
+    return ret
+
+
+######################
+## DEFINE VARIABLES ##
+######################
+
+
+normalization_methods = get_normalization_methods()
+external_datasets = get_external_datasets()
+
+macs2_modes = get_macs2_modes()
+
+config["reads_dir"] = get_reads_dir()
+
+config["results_dir"] = Path(config["results_dir"]).absolute()
+config["log_dir"] = config["results_dir"].joinpath("log")
+config["trim_dir"] = config["results_dir"].joinpath("trim")
+config["alignments_dir"] = config["results_dir"].joinpath("alignments")
+config["bigwig_dir"] = config["results_dir"].joinpath("bigwig")
+config["bedgraph_dir"] = config["results_dir"].joinpath("bedgraph")
+config["peaks_dir"] = config["results_dir"].joinpath("peaks")
+config["coverage_dir"] = config["results_dir"].joinpath("coverage")
+
+config["pictures_dir"] = config["results_dir"].joinpath("pictures")
+config["tables_dir"] = config["results_dir"].joinpath("tables")
+
+config["references_dir"] = Path(config["references_dir"]).absolute()
+
+config["genome_fasta"] = config["references_dir"].joinpath(
+    get_filename(config["genome"]["fasta_link"])
+)
+
+config["genome_fasta_filter"] = get_genome_filter_fasta_path(str(config["genome_fasta"]))
+config["genome_fasta_filter_index"] = get_genome_filter_index_path(
+    str(config["genome_fasta"])
+)
+
+config["genome_gtf"] = config["references_dir"].joinpath(
+    get_filename(config["genome"]["gtf_link"])
+)
+config["bowtie2_index_root"] = config["references_dir"].joinpath(
+    "bowtie2", get_filename(config["genome_fasta_filter"])
+)
+config["encode_blacklist"] = config["references_dir"].joinpath("blacklist.bed.gz")
+config["assets_dir"] = Path("assets").absolute()
+
+
+###########
+## HOOKS ##
+###########
+
+
+onstart:
+    import json
+    from rich import print_json
+
+    validate_protocol()
+
+    d = {k: str(v) if not isinstance(v, dict) else v for k, v in config.items()}
+    print_json(json.dumps(d))
+
+
+###########
+## RULES ##
+###########
+
+
+include: "include/fastqc.smk"
+include: "include/trimmomatic.smk"
+include: "include/bowtie2.smk"
+include: "include/rmdup.smk"
+include: "include/multiBamSummary.smk"
+include: "include/plotFingerprint.smk"
+include: "include/estimate_seqdepth.smk"
+include: "include/bamCoverage.smk"
+include: "include/macs2.smk"
+include: "include/prepare_peaks.smk"
+include: "include/computeMatrix.smk"
+include: "include/estimate_fragsize.smk"
+include: "include/download_references.smk"
+include: "include/annotate_peaks.smk"
+include: "include/promoter_peaks.smk"
+include: "include/volcano_plot.smk"
+include: "include/filter_bam.smk"
+include: "include/compare_external_dataset.smk"
+
+
+ruleorder: screenshot_config_bw_compare > screenshot_config
+
+
+rule all:
+    input:
+        get_bw,
+        config["pictures_dir"].joinpath("fingerprint/fingerprint.png"),  # plotFingerprint
+        config["pictures_dir"].joinpath("multiBamSummary", "heatmap.pdf"),
+        config["pictures_dir"].joinpath("multiBamSummary", "pca.pdf"),
+        expand(
+            config["pictures_dir"].joinpath(
+                "{heatmap_type}",
+                "{macs2_mode}",
+                "{computeMatrix_mode}",
+                "{normalization_method}.pdf",
+            ),
+            heatmap_type=["heatmap", "heatmap-promoters"],
+            macs2_mode=get_macs2_modes_for_peaks_heatmap(macs2_modes),
+            computeMatrix_mode="reference-point",
+            normalization_method=normalization_methods,
+        ),
+        expand(
+            config["results_dir"].joinpath("qc", "multiqc", "{report_name}.html"),
+            report_name=["fastqc-raw", "fastqc-trimmed", "alignment", "peaks"],
+        ),
+        expand(
+            config["pictures_dir"].joinpath(
+                "differential-binding", "{macs2_mode}", "volcano.pdf"
+            ),
+            macs2_mode=macs2_modes,
+        ),
+        expand(
+            config["pictures_dir"].joinpath(
+                "differential-binding", "{macs2_mode}", "scatterplot.pdf"
+            ),
+            macs2_mode=macs2_modes,
+        ),
+        expand(
+            config["pictures_dir"].joinpath("peaks", "{macs2_mode}", "npeaks.pdf"),
+            macs2_mode=macs2_modes,
+        ),
+        # get_macs2_model_plots,
+        expand(
+            config["peaks_dir"].joinpath("{macs2_mode}", "intervene"),
+            macs2_mode=macs2_modes,
+        ),
+        expand(
+            config["pictures_dir"].joinpath(
+                "peaks",
+                "{macs2_mode}",
+                "intervene",
+                "{bigwig_normalization_method}",
+                "igv.done",
+            ),
+            bigwig_normalization_method=normalization_methods + ["bam"],
+            macs2_mode=macs2_modes,
+        ),
+        # expand(
+        #     config["tables_dir"].joinpath(
+        #         "differential-binding",
+        #         "{macs2_mode}",
+        #         "scale-regions",
+        #         "{normalization_method}.gz",
+        #     ),
+        #     macs2_mode=macs2_modes,
+        #     normalization_method=normalization_methods,
+        # ),
+        expand(
+            config["pictures_dir"].joinpath(
+                "{heatmap_type}",
+                "{macs2_mode}",
+                "{computeMatrix_mode}",
+                "{normalization_method}.pdf",
+            ),
+            heatmap_type=["heatmap-roi", "heatmap-promoters"],
+            macs2_mode=get_macs2_modes_for_peaks_heatmap(macs2_modes),
+            computeMatrix_mode="scale-regions",
+            normalization_method=normalization_methods,
+        ),
+        get_external_datasets_igv_screenshots,
+        get_external_datasets_comparisons,
+        get_external_datasets_correlation_heatmaps,
+        expand(config["results_dir"].joinpath(
+            "external-comparison",
+            "{external_dataset}",
+            "correlation-pca.pdf",
+        ), external_dataset=get_external_datasets()),
+        expand(config["results_dir"].joinpath(
+            "external-comparison",
+            "{external_dataset}",
+            "correlation-heatmap.pdf",
+        ), external_dataset=get_external_datasets())
+
+
+use rule multiqc_fastqc_raw as multiqc_bowtie2 with:
+    input:
+        get_alignments,
+        get_rmdup,
+        get_idxstat,
+        get_fingerprints,
+        # get_corMatrices,
+        # get_PCA,
+    output:
+        report(
+            config["results_dir"].joinpath("qc", "multiqc", "alignment.html"),
+            category="MultiQC",
+            subcategory="Alignment",
+        ),
+    log:
+        config["log_dir"].joinpath("multiqc/alignment.log"),
+
+
+use rule multiqc_fastqc_raw as multiqc_peaks with:
+    input:
+        get_peaks,
+    output:
+        report(
+            config["results_dir"].joinpath("qc", "multiqc", "peaks.html"),
+            category="MultiQC",
+            subcategory="Peak calling",
+        ),
+    log:
+        config["log_dir"].joinpath("multiqc/peaks.log"),

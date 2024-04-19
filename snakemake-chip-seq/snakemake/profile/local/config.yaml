@@ -1,0 +1,16 @@
+cores: 2
+local-cores: 2
+jobs: 1
+restart-times: 0
+reason: True
+printshellcmds: True
+show-failed-logs: True
+use-conda: True
+use-singularity: False
+singularity-args: "--no-home --bind /home/francescotabaro/Projects/snakemake-chipseq"
+rerun-incomplete: True
+latency-wait: 10
+keep-incomplete: True
+
+resources:
+  - mem_mb=10000

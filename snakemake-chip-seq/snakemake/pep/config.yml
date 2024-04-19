@@ -1,0 +1,21 @@
+pep_version: 2.1.0
+sample_table: "../../testdata/sample-sheet.csv"
+
+sample_modifiers:
+  append:
+    # sample_type: sample
+    file_path: reads
+  derive:
+    attributes: ["file_path"]
+    sources:
+      reads: "/home/francesco/Projects/snakemake-chipseq/testdata/reads/{filename}"
+  # imply:
+  #   - if:
+  #       sample_name: KGRY6_P8-non-self-act_22s002960-1-2_Ermakova_lane122s002960_sequence.txt.gz
+  #     then:
+  #       sample_type: input
+  #   - if:
+  #       sample_name: KBTPY_B1H_P8_1_42_22s001601-1-2_Ermakova_lane1Sample22_sequence.txt.gz
+  #     then:
+  #       sample_type: blacklist
+     
