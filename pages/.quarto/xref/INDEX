@@ -1,0 +1,14 @@
+{
+  "index.qmd": {
+    "index.html": "cc35817d"
+  },
+  "about.qmd": {
+    "about.html": "ca9d4f9b"
+  },
+  "LSA-vignette.Rmd": {
+    "LSA-vignette.html": "1dda297b"
+  },
+  "test.qmd": {
+    "test.html": "7e042366"
+  }
+}
