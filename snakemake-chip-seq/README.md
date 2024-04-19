@@ -1,1 +1,0 @@
-A Snakemake pipeline for ChIP-seq data analysis.
