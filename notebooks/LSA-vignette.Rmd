@@ -1,0 +1,294 @@
+---
+title: "LSA-Mielnicka-vignette"
+author: "Monika Mielnicka"
+date: "3/3/2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("dplyr")
+library("ggplot2")
+library("tidyverse")
+library("tidyr")
+library("car")
+library("rstatix")
+library("multcomp")
+library("ggpubr")
+library("MASS")
+library("pander")
+library("lubridate")
+
+```
+
+## R Markdown
+
+# Function made by Francesco for pretty graphs
+
+```{r}
+ggtheme <- function(legend.position = "bottom") {
+  theme_classic(base_size = 14) %+replace%
+    theme(aspect.ratio = 1,
+          legend.position = legend.position,
+          legend.text = element_text(size = 14),
+          axis.title = element_text(size = 15),
+          legend.title = element_text(size = 15),
+          plot.title = element_text(size = 16),
+          strip.text = element_text(size = 14))
+}
+```
+
+# summary function
+```{r}
+data_summary <- function(x) {
+  m <- mean(x)
+  ymin <- m-sd(x)
+  ymax <- m+sd(x)
+  return(c(y=m,ymin=ymin,ymax=ymax))
+}
+
+```
+
+# data load GFP line
+```{r}
+gfp_breeding_table = readxl::read_xlsx(path = "../data/Mielnicka et al. 2024 source data.xlsx", sheet = 7)
+head(gfp_breeding_table)
+```
+# birth weights for progeny sired by GFP/GFP males vs WT
+
+```{r}
+# graph 
+gfp_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  ggplot(aes(x = genotype, y = weight_at_birth, fill = genotype)) +
+  geom_violin(trim = F) +
+  geom_boxplot(width = 0.2) +
+  stat_summary(fun = mean, geom = "point", shape = 5, size = 2) +
+  labs(y="Weight of pups at birth (g)", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "KO"), labels = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("gfp/gfp", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+# testing
+
+gfp_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  t_test(weight_at_birth ~ genotype, alternative = "two.sided") %>%
+  add_significance()
+
+gfp_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  dplyr::rename(genotype = genotype) %>%
+  group_by(genotype) %>%
+  summarise(mean = mean(weight_at_birth), median = median(weight_at_birth), sd = sd(weight_at_birth))
+```
+# weaning weights for progeny sired by GFP/GFP males vs WT
+
+```{r}
+#graph
+gfp_breeding_table %>%
+  separate_rows(weight_at_weaning, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_weaning = col_double())) %>%
+  drop_na(weight_at_weaning) %>%
+  ggplot(aes(x = genotype, y = weight_at_weaning, fill = genotype)) +
+  geom_violin(trim = F) +
+  geom_boxplot(width = 0.2) +
+  stat_summary(fun = mean, shape = 5, size = 0.5) +
+  labs(y="Weight of pups at weening (g)", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "KO"), labels = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("gfp/gfp", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+#testing
+
+gfp_breeding_table %>%
+  separate_rows(weight_at_weaning, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_weaning = col_double())) %>%
+  drop_na(weight_at_weaning) %>%
+  t_test(weight_at_weaning ~ genotype, alternative = "greater") %>%
+  add_significance()
+
+gfp_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  drop_na(weight_at_birth) %>%
+  group_by(genotype) %>%
+  dplyr::summarise(mean = mean(weight_at_birth), median = median(weight_at_birth), sd = sd(weight_at_birth))
+
+```
+# data load for PHD line
+
+```{r}
+phd_breeding_table =  readxl::read_xlsx(path = "../data/Mielnicka et al. 2024 source data.xlsx", sheet = 8)
+head(phd_breeding_table)
+
+```
+# birth weights for progeny sired by PHD/PHD males vs WT
+
+```{r}
+phd_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  drop_na(weight_at_birth) %>%
+  ggplot(aes(x = genotype, y = weight_at_birth, fill = genotype)) +
+  geom_violin(trim = F) +
+  geom_boxplot(width=0.1) +
+  stat_summary(fun=mean, geom="point", shape=23, size=2) +
+  labs(y="Weight of pups at birth (g)", x = "") +
+  scale_x_discrete(limits = c("WT", "KO"), labels = c("WT", "phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("phd", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+#testing
+phd_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  drop_na(weight_at_birth) %>%
+  t_test(weight_at_birth ~ genotype) %>%
+  add_significance()
+
+phd_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  drop_na(weight_at_birth) %>%
+  group_by(genotype) %>%
+  dplyr::summarise(mean = mean(weight_at_birth), median = median(weight_at_birth), sd = sd(weight_at_birth))
+
+```
+# ween weights for progeny sired by PHD/PHD males vs WT
+
+```{r}
+#graph
+phd_breeding_table %>%
+  separate_rows(weight_at_weaning, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_weaning = col_double())) %>%
+  drop_na(weight_at_weaning) %>%
+  ggplot(aes(x = genotype, y = weight_at_weaning, fill = genotype)) +
+  geom_violin(trim = F) +
+  geom_boxplot(width = 0.1) +
+  stat_summary(fun.y=mean, geom="point", shape=23, size=2) +
+  labs(y="Weight of pups at weaning (g)", x = "") +
+  scale_x_discrete(limits = c("WT", "KO"), labels = c("WT", "phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("phd", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+#testing
+phd_breeding_table %>%
+  separate_rows(weight_at_weaning, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_weaning = col_double())) %>%
+  drop_na(weight_at_weaning) %>%
+  t_test(weight_at_weaning ~ genotype, alternative = "greater") %>%
+  add_significance()
+
+phd_breeding_table %>%
+  separate_rows(weight_at_weaning, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_weaning = col_double())) %>%
+  drop_na(weight_at_weaning) %>%
+  group_by(genotype) %>%
+  summarise(mean = mean(weight_at_weaning), median = median(weight_at_weaning), sd = sd(weight_at_weaning))
+
+
+```
+
+# litter sizes GFP
+```{r}
+
+gfp_breeding_table %>% 
+  ggplot(aes(x = genotype, y = no_pups_born, fill = genotype)) +
+  geom_violin(trim = F) +
+  geom_boxplot(width = 0.1) +
+  stat_summary(fun.y=mean, geom="point", shape=23, size=2) +
+  labs(y="litter size distribution", x = "") +
+  scale_x_discrete(limits = c("WT", "KO"), labels = c("WT", "phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("phd", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+gfp_breeding_table %>%
+  drop_na(no_pups_born) %>%
+  t_test(no_pups_born ~ genotype) %>%
+  add_significance()
+
+gfp_breeding_table %>%
+  group_by(genotype) %>%
+  summarise(mean = mean(no_pups_born), median = median(no_pups_born), sd = sd(no_pups_born))
+
+  
+
+```
+# litter sizes PHD
+
+```{r}
+
+phd_breeding_table %>%
+  ggplot(aes(x = genotype, y = n_pups_born, fill = genotype)) +
+  geom_violin(trim = F) +
+  geom_boxplot(width = 0.1) +
+  stat_summary(fun.y=mean, geom="point", shape=23, size=2) +
+  labs(y="litter size distribution", x = "") +
+  scale_x_discrete(limits = c("WT", "KO"), labels = c("WT", "phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("phd", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+phd_breeding_table %>%
+  drop_na(n_pups_born) %>%
+  t_test(n_pups_born ~ genotype) %>%
+  add_significance()
+
+phd_breeding_table %>%
+  group_by(genotype) %>%
+  summarise(mean = mean(n_pups_born), median = median(n_pups_born), sd = sd(n_pups_born))
+
+
+```
+
+# female breeding 
+
+```{r}
+fem_breeding_table = readxl::read_xlsx(path = "../data/Mielnicka et al. 2024 source data.xlsx", sheet = 9)
+head(fem_breeding_table)
+
+```
+# birth weights females Trim66-GFP/GFP
+
+```{r}
+fem_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  drop_na(weight_at_birth) %>%
+  ggplot(aes(x = genotype, y = weight_at_birth, fill = genotype)) +
+  geom_violin(trim = F) +
+  geom_boxplot(width=0.1) +
+  stat_summary(fun=mean, geom="point", shape=23, size=2) +
+  labs(y="Weight of pups at birth (g)", x = "") +
+  scale_x_discrete(limits = c("WT", "KO"), labels = c("WT", "gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("gfp", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+# testing
+
+fem_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  drop_na(weight_at_birth) %>%
+  t_test(weight_at_birth ~ genotype) %>%
+  add_significance()
+
+fem_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  drop_na(weight_at_birth) %>%
+  group_by(genotype) %>%
+  dplyr::summarise(mean = mean(weight_at_birth), median = median(weight_at_birth), sd = sd(weight_at_birth))
+
+```
