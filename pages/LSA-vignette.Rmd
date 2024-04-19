@@ -1,1 +1,655 @@
-../notebooks/LSA-vignette.Rmd
+---
+title: "LSA-Mielnicka-vignette"
+author: "Monika Mielnicka"
+date: "3/3/2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("dplyr")
+library("ggplot2")
+library("tidyverse")
+library("tidyr")
+library("car")
+library("rstatix")
+library("multcomp")
+library("ggpubr")
+library("MASS")
+library("pander")
+library("lubridate")
+
+```
+
+## R Markdown
+
+# Function made by Francesco for pretty graphs
+
+```{r}
+ggtheme <- function(legend.position = "bottom") {
+  theme_classic(base_size = 14) %+replace%
+    theme(aspect.ratio = 1,
+          legend.position = legend.position,
+          legend.text = element_text(size = 14),
+          axis.title = element_text(size = 15),
+          legend.title = element_text(size = 15),
+          plot.title = element_text(size = 16),
+          strip.text = element_text(size = 14))
+}
+```
+
+# summary function
+```{r}
+data_summary <- function(x) {
+  m <- mean(x)
+  ymin <- m-sd(x)
+  ymax <- m+sd(x)
+  return(c(y=m,ymin=ymin,ymax=ymax))
+}
+
+```
+
+# data load gfp/gfp line
+```{r}
+gfp_breeding_table = readxl::read_xlsx(path = "Source_data_Mielnicka.xlsx", sheet = 7)
+head(gfp_breeding_table)
+```
+# birth weights for progeny sired by gfp/gfp males vs WT
+
+```{r}
+# graph 
+gfp_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  ggplot(aes(x = genotype, y = weight_at_birth, fill = genotype)) +
+  geom_violin(trim = F) +
+  geom_boxplot(width = 0.2) +
+  stat_summary(fun = mean, geom = "point", shape = 5, size = 2) +
+  labs(y="Weight of pups at birth (g)", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("gfp/gfp", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+# testing
+
+ggsave("weight at birth gfpvswt figure3aleft.svg", device = "svg")
+
+gfp_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  t_test(weight_at_birth ~ genotype, alternative = "two.sided") %>%
+  add_significance()
+
+gfp_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  dplyr::rename(genotype = genotype) %>%
+  group_by(genotype) %>%
+  summarise(mean = mean(weight_at_birth), median = median(weight_at_birth), sd = sd(weight_at_birth))
+```
+# weaning weights for progeny sired by gfp/gfp males vs WT
+
+```{r}
+#graph
+gfp_breeding_table %>%
+  separate_rows(weight_at_weaning, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_weaning = col_double())) %>%
+  drop_na(weight_at_weaning) %>%
+  ggplot(aes(x = genotype, y = weight_at_weaning, fill = genotype)) +
+  geom_violin(trim = F) +
+  geom_boxplot(width = 0.2) +
+  stat_summary(fun = mean, shape = 5, size = 0.5) +
+  labs(y="Weight of pups at weening (g)", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("gfp/gfp", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+ggsave("weight at ween gfpvswt figure3aright.svg", device = "svg")
+
+
+#testing
+
+gfp_breeding_table %>%
+  separate_rows(weight_at_weaning, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_weaning = col_double())) %>%
+  drop_na(weight_at_weaning) %>%
+  t_test(weight_at_weaning ~ genotype, alternative = "greater") %>%
+  add_significance()
+
+gfp_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  drop_na(weight_at_birth) %>%
+  group_by(genotype) %>%
+  dplyr::summarise(mean = mean(weight_at_birth), median = median(weight_at_birth), sd = sd(weight_at_birth))
+
+```
+# data load for phd/phd line
+
+```{r}
+phd_breeding_table =  readxl::read_xlsx(path = "Source_data_Mielnicka.xlsx", sheet = 8)
+head(phd_breeding_table)
+
+```
+# birth weights for progeny sired by phd/phd males vs WT
+
+```{r}
+phd_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  drop_na(weight_at_birth) %>%
+  ggplot(aes(x = genotype, y = weight_at_birth, fill = genotype)) +
+  geom_violin(trim = F) +
+  geom_boxplot(width=0.1) +
+  stat_summary(fun=mean, geom="point", shape=23, size=2) +
+  labs(y="Weight of pups at birth (g)", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "phd/phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("phd/phd", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+ggsave("weight at birth phdvswt figure3cleft.svg", device = "svg")
+
+
+#testing
+phd_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  drop_na(weight_at_birth) %>%
+  t_test(weight_at_birth ~ genotype) %>%
+  add_significance()
+
+phd_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  drop_na(weight_at_birth) %>%
+  group_by(genotype) %>%
+  dplyr::summarise(mean = mean(weight_at_birth), median = median(weight_at_birth), sd = sd(weight_at_birth))
+
+```
+# ween weights for progeny sired by phd/phd males vs WT
+
+```{r}
+#graph
+phd_breeding_table %>%
+  separate_rows(weight_at_weaning, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_weaning = col_double())) %>%
+  drop_na(weight_at_weaning) %>%
+  ggplot(aes(x = genotype, y = weight_at_weaning, fill = genotype)) +
+  geom_violin(trim = F) +
+  geom_boxplot(width = 0.1) +
+  stat_summary(fun.y=mean, geom="point", shape=23, size=2) +
+  labs(y="Weight of pups at weaning (g)", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "phd/phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("phd/phd", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+ggsave("weight at ween  phdvswt figure3cright.svg", device = "svg")
+
+#testing
+phd_breeding_table %>%
+  separate_rows(weight_at_weaning, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_weaning = col_double())) %>%
+  drop_na(weight_at_weaning) %>%
+  t_test(weight_at_weaning ~ genotype, alternative = "greater") %>%
+  add_significance()
+
+phd_breeding_table %>%
+  separate_rows(weight_at_weaning, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_weaning = col_double())) %>%
+  drop_na(weight_at_weaning) %>%
+  group_by(genotype) %>%
+  summarise(mean = mean(weight_at_weaning), median = median(weight_at_weaning), sd = sd(weight_at_weaning))
+
+```
+
+# litter sizes gfp/gfp
+```{r}
+
+gfp_breeding_table %>%
+  drop_na(no_pups_born) %>%
+  ggplot(aes(x = genotype, y = no_pups_born, fill = genotype)) +
+  geom_boxplot() +
+  geom_dotplot(size = 3, binaxis='y', stackdir='center') +
+  stat_summary(fun.y=mean, geom="point", shape=23, size=2) +
+  labs(y="litter size distribution", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("gfp/gfp", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+ggsave("littersizes gfpvswt.svg", device = "svg")
+
+
+gfp_breeding_table %>%
+  drop_na(no_pups_born) %>%
+  t_test(no_pups_born ~ genotype) %>%
+  add_significance()
+
+gfp_breeding_table %>%
+  group_by(genotype) %>%
+  summarise(mean = mean(no_pups_born), median = median(no_pups_born), sd = sd(no_pups_born))
+
+  
+
+```
+# litter sizes phd/phd
+
+```{r}
+
+phd_breeding_table %>%
+  drop_na(n_pups_born) %>%
+  ggplot(aes(x = genotype, y = n_pups_born, fill = genotype)) +
+  geom_boxplot() +
+  geom_dotplot(size = 3, binaxis='y', stackdir='center') +
+  stat_summary(fun.y=mean, geom="point", shape=23, size=2) +
+  labs(y="litter size distribution", x = "") +
+  scale_x_discrete(limits = c("WT", "phd/phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("phd/phd", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+ggsave("littersizes phdvswt.svg", device = "svg")
+
+
+phd_breeding_table %>%
+  drop_na(n_pups_born) %>%
+  t_test(n_pups_born ~ genotype) %>%
+  add_significance()
+
+phd_breeding_table %>%
+  group_by(genotype) %>%
+  summarise(mean = mean(n_pups_born), median = median(n_pups_born), sd = sd(n_pups_born))
+
+
+```
+
+# female breeding 
+
+```{r}
+fem_breeding_table = readxl::read_xlsx(path = "Source_data_Mielnicka.xlsx", sheet = 9)
+head(fem_breeding_table)
+
+```
+# birth weights females gfp/gfp
+
+```{r}
+fem_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  drop_na(weight_at_birth) %>%
+  ggplot(aes(x = genotype, y = weight_at_birth, fill = genotype)) +
+  geom_violin(trim = F) +
+  geom_boxplot(width=0.1) +
+  stat_summary(fun=mean, geom="point", shape=23, size=2) +
+  labs(y="Weight of pups at birth (g)", x = "") +
+  scale_x_discrete(limits = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("gfp/gfp", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+ggsave("birth weights femgfpvswt.svg", device = "svg")
+
+
+# testing
+
+fem_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  drop_na(weight_at_birth) %>%
+  t_test(weight_at_birth ~ genotype) %>%
+  add_significance()
+
+fem_breeding_table %>%
+  separate_rows(weight_at_birth, sep = "-") %>%
+  type_convert(col_types = cols(weight_at_birth = col_double())) %>%
+  drop_na(weight_at_birth) %>%
+  group_by(genotype) %>%
+  dplyr::summarise(mean = mean(weight_at_birth), median = median(weight_at_birth), sd = sd(weight_at_birth))
+
+```
+
+# gfp/gfp fem littersizes 
+```{r}
+
+fem_breeding_table %>%
+  drop_na(no_pups_born) %>%
+  ggplot(aes(x = genotype, y = no_pups_born, fill = genotype)) +
+  geom_boxplot() +
+  geom_dotplot(size = 3, binaxis='y', stackdir='center') +
+  stat_summary(fun.y=mean, geom="point", shape=23, size=2) +
+  labs(y="litter size distribution", x = "") +
+  scale_x_discrete(limits = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("gfp/gfp", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+
+ggsave("littersizes femgfpvswt.svg", device = "svg")
+
+
+fem_breeding_table %>%
+  drop_na(no_pups_born) %>%
+  t_test(no_pups_born ~ genotype) %>%
+  add_significance()
+
+fem_breeding_table %>%
+  group_by(genotype) %>%
+  summarise(mean = mean(no_pups_born), median = median(no_pups_born), sd = sd(no_pups_born))
+```
+
+# testis weight gfp/gfp data load
+
+```{r}
+gfp_testis_table = readxl::read_xlsx(path = "Source_data_Mielnicka.xlsx", sheet = 1)
+
+gfp_testis_table = gfp_testis_table %>%
+  pivot_longer(cols = testis_1_weight_g:testis_2_weight_g, names_to = "testis_num", values_to = "testis_weight")
+head(gfp_testis_table)
+
+```
+# tesits weight gfp/gfp test
+
+```{r}
+
+gfp_testis_table %>%
+  ggplot(aes(x = genotype, y = testis_weight*1000, fill = genotype)) +
+  geom_boxplot() +
+  geom_dotplot(size = 3, binaxis='y', stackdir='center') +
+  stat_summary(fun.y=mean, geom="point", shape=23, size=2) +
+  labs(y="testis weight (mg)", x = "") +
+  scale_x_discrete(limits = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("gfp/gfp", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+ggsave("tests_weight_gfp.svg", device = "svg")
+
+
+gfp_testis_table %>%
+  drop_na(testis_weight) %>%
+  t_test(testis_weight ~ genotype) %>%
+  add_significance()
+
+gfp_testis_table %>%
+  group_by(genotype) %>%
+  summarise(mean = mean(testis_weight), median = median(testis_weight), sd = sd(testis_weight))
+
+
+```
+# sperm parameters gfp/gfp data load
+
+```{r}
+sperm_parameters_gfp = gfp_testis_table = readxl::read_xlsx(path = "Source_data_Mielnicka.xlsx", sheet = 2)
+head(sperm_parameters_gfp)
+
+sperm_parameters_gfp = sperm_parameters_gfp %>%
+  pivot_longer(cols = `Total Number million /mL`:`% Vibrating Motility`, values_to = "measurments",  names_to = "parameter")
+head(sperm_parameters_gfp)
+
+ivf_gfp = readxl::read_xlsx(path = "Source_data_Mielnicka.xlsx", sheet = 3)
+head(ivf_gfp)
+
+ivf_gfp = ivf_gfp %>%
+   pivot_longer(cols = `N. Oocytes`:`% Fertilization`, values_to = "measurments",  names_to = "parameter")
+head(ivf_gfp)
+
+```
+# sperm parameters & IVF gfp/gfp
+# sperm count
+```{r}
+sperm_parameters_gfp %>%
+  dplyr::filter(parameter == "Total Number million /mL") %>%
+  ggplot(aes(x = Mutation, y = measurments, fill = Mutation)) +
+  geom_boxplot() +
+  scale_x_discrete(limits = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("WT", "gfp/gfp")) +
+  labs(y="total number million/ml", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("gfp/gfp", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+sperm_parameters_gfp %>%
+  dplyr::filter(parameter == "Total Number million /mL") %>%
+  t_test(measurments ~ Mutation) %>%
+  add_significance()
+
+sperm_parameters_gfp %>%
+  dplyr::filter(parameter == "Total Number million /mL") %>%
+  group_by(Mutation) %>%
+  summarise(mean = mean(measurments), median = median(measurments), sd = sd(measurments)) 
+```
+# sperm motility in % for gfp/gfp
+```{r}
+sperm_parameters_gfp %>%
+  dplyr::filter(!parameter == "Total Number million /mL") %>%
+  ggplot(aes(x = Mutation, y = measurments, fill = Mutation)) +
+  geom_boxplot() +
+  facet_wrap(~factor(parameter, levels = c("% Progressive Motility", "% Vibrating Motility", "% Total Motility"))) +
+  geom_boxplot() +
+  stat_summary(fun = mean, shape = 5, size = 0.4) +
+  scale_x_discrete(limits = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("WT", "gfp/gfp")) +
+  labs(y="sperm paramters", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("gfp/gfp", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+ggsave(filename = "sperm_parameters.svg", plot = last_plot(), device = "svg")
+
+sperm_parameters_gfp %>%
+  dplyr::filter(!parameter == "Total Number million /mL") %>%
+  group_by(parameter) %>%
+  t_test(measurments ~ Mutation) %>%
+  add_significance()
+
+sperm_parameters_gfp %>%
+  dplyr::filter(!parameter == "Total Number million /mL") %>%
+  group_by(parameter, Mutation) %>%
+  summarise(mean = mean(measurments), median = median(measurments), sd = sd(measurments))
+```
+
+# IVF results gfp/gfp
+
+```{r}
+
+ivf_gfp %>%
+  dplyr::filter(parameter == "% Fertilization") %>%
+  ggplot(aes(x = Mutation, y = measurments, fill = Mutation)) +
+  geom_boxplot() +
+  stat_summary(fun = mean, shape = 5, size = 0.5) +
+  scale_x_discrete(limits = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("WT", "gfp/gfp")) +
+  labs(y="percentage of oocytes", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("gfp/gfp", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+ivf_gfp %>%
+  dplyr::filter(parameter == "% Fertilization") %>%
+  t_test(measurments ~ Mutation) %>%
+  add_significance()
+
+# number of oocytes and fertilised eggs reaching 2cell stage (2N)
+
+ivf_gfp %>%
+  dplyr::filter(!parameter == "% Fertilization") %>%
+  ggplot(aes(x = Mutation, y = measurments, fill = Mutation)) +
+  geom_boxplot() +
+  stat_summary(fun = mean, shape = 5, size = 0.5) +
+  facet_wrap(~factor(parameter, levels =c("N. Oocytes", "N. 2-Cells"))) +
+  scale_x_discrete(limits = c("WT", "gfp/gfp"), labels = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("WT", "gfp/gfp")) +
+  labs(y="percentage of oocytes", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "gfp/gfp")) +
+  scale_fill_discrete(name = "genotype", labels = c("gfp/gfp", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+```
+# testis weight phd/phd
+
+```{r}
+phd_testis_table = readxl::read_xlsx(path = "Source_data_Mielnicka.xlsx", sheet = 4)
+
+phd_testis_table = phd_testis_table %>%
+  pivot_longer(cols = testis_1_weight:testis_2_weight, names_to = "testis_num", values_to = "testis_weight")
+head(phd_testis_table) 
+
+phd_testis_table %>%
+  ggplot(aes(x = genotype, y = testis_weight*1000, fill = genotype)) +
+  geom_boxplot() +
+  geom_dotplot(size = 3, binaxis='y', stackdir='center') +
+  stat_summary(fun.y=mean, geom="point", shape=23, size=2) +
+  labs(y="testis weight (mg)", x = "") +
+  scale_x_discrete(limits = c("WT", "phd/phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("phd/phd", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+ggsave("tests_weight_phd.svg", device = "svg")
+
+
+phd_testis_table %>%
+  drop_na(testis_weight) %>%
+  t_test(testis_weight ~ genotype) %>%
+  add_significance()
+
+phd_testis_table %>%
+  group_by(genotype) %>%
+  summarise(mean = mean(testis_weight), median = median(testis_weight), sd = sd(testis_weight))
+
+```
+
+
+# sperm parameters phd/phd data load
+
+```{r}
+sperm_parameters_phd = readxl::read_xlsx(path = "Source_data_Mielnicka.xlsx", sheet = 5)
+head(sperm_parameters_phd)
+
+sperm_parameters_phd = sperm_parameters_phd %>%
+  pivot_longer(cols = `Total Number million /mL`:`% Vibrating Motility`, values_to = "measurments",  names_to = "parameter")
+head(sperm_parameters_phd)
+
+ivf_phd = readxl::read_xlsx(path = "Source_data_Mielnicka.xlsx", sheet = 6)
+head(ivf_phd)
+
+ivf_phd = ivf_phd %>%
+   pivot_longer(cols = `N. Oocytes`:`% Fertilization`, values_to = "measurments",  names_to = "parameter")
+head(ivf_phd)
+
+```
+# sperm count phd/phd
+
+```{r}
+sperm_parameters_phd %>%
+  dplyr::filter(parameter == "Total Number million /mL") %>%
+  ggplot(aes(x = Mutation, y = measurments, fill = Mutation)) +
+  geom_boxplot() +
+  scale_x_discrete(limits = c("WT", "phd/phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("WT", "phd/phd")) +
+  labs(y="total number million/ml", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "phd/phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("phd/phd", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+sperm_parameters_phd %>%
+  dplyr::filter(parameter == "Total Number million /mL") %>%
+  t_test(measurments ~ Mutation) %>%
+  add_significance()
+
+sperm_parameters_phd %>%
+  dplyr::filter(parameter == "Total Number million /mL") %>%
+  group_by(Mutation) %>%
+  summarise(mean = mean(measurments), median = median(measurments), sd = sd(measurments)) 
+```
+# sperm motility in %  phd/phd
+```{r}
+sperm_parameters_phd %>%
+  dplyr::filter(!parameter == "Total Number million /mL") %>%
+  ggplot(aes(x = Mutation, y = measurments, fill = Mutation)) +
+  geom_boxplot() +
+  facet_wrap(~factor(parameter, levels = c("% Progressive Motility", "% Vibrating Motility", "% Total Motility"))) +
+  geom_boxplot() +
+  stat_summary(fun = mean, shape = 5, size = 0.4) +
+  scale_x_discrete(limits = c("WT", "phd/phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("WT", "phd/phd")) +
+  labs(y="sperm paramters", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "phd/phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("phd/phd", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+ggsave(filename = "sperm_parameters phdphd.svg", plot = last_plot(), device = "svg")
+
+sperm_parameters_phd %>%
+  dplyr::filter(!parameter == "Total Number million /mL") %>%
+  group_by(parameter) %>%
+  t_test(measurments ~ Mutation) %>%
+  add_significance()
+
+sperm_parameters_phd %>%
+  dplyr::filter(!parameter == "Total Number million /mL") %>%
+  group_by(parameter, Mutation) %>%
+  summarise(mean = mean(measurments), median = median(measurments), sd = sd(measurments))
+```
+
+# IVF results phd/phd
+
+```{r}
+
+ivf_phd %>%
+  dplyr::filter(parameter == "% Fertilization") %>%
+  ggplot(aes(x = Mutation, y = measurments, fill = Mutation)) +
+  geom_boxplot() +
+  stat_summary(fun = mean, shape = 5, size = 0.5) +
+  scale_x_discrete(limits = c("WT", "phd/phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("WT", "phd/phd")) +
+  labs(y="percentage of oocytes", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "phd/phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("phd/phd", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+ivf_phd %>%
+  dplyr::filter(parameter == "% Fertilization") %>%
+  t_test(measurments ~ Mutation) %>%
+  add_significance()
+
+# number of oocytes and fertilised eggs reaching 2cell stage (2N)
+
+ivf_phd %>%
+  dplyr::filter(!parameter == "% Fertilization") %>%
+  ggplot(aes(x = Mutation, y = measurments, fill = Mutation)) +
+  geom_boxplot() +
+  stat_summary(fun = mean, shape = 5, size = 0.5) +
+  facet_wrap(~factor(parameter, levels =c("N. Oocytes", "N. 2-Cells"))) +
+  scale_x_discrete(limits = c("WT", "phd/phd"), labels = c("WT", "phd/phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("WT", "phd/phd")) +
+  labs(y="percentage of oocytes", x = "") +
+  guides(fill=guide_legend(title="genotype")) +
+  scale_x_discrete(limits = c("WT", "phd/phd")) +
+  scale_fill_discrete(name = "genotype", labels = c("phd/phd", "WT")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  ggtheme()
+
+```
