@@ -7,7 +7,7 @@ This website shows results from breeding and RNA-seq experiments as reported in[
 Notebooks:
 
 - [Breeding results](LSA-vignette.Rmd)
-- [RNA-seq results](test.qmd)
+- [RNA-seq results](rna-seq-results.qmd)
 
 Data download:
 
