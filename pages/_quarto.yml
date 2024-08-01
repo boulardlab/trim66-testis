@@ -10,7 +10,7 @@ website:
         text: Home
       - href: LSA-vignette.Rmd
         text: Breeding results
-      - href: test.qmd
+      - href: rna-seq-results.qmd
         text: RNA-seq results 
 
 format:
