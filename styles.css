@@ -1,0 +1,9 @@
+/* css styles */
+iframe {
+    position: fixed;
+    top: 3rem;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: none;
+}
